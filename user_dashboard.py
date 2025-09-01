@@ -82,7 +82,7 @@ class UserDashboardScreen(MDScreen):
     
     def on_enter(self):
         self.update_status()
-        self.update_event = Clock.schedule_interval(self.update_status, 5)  # Update every 5 seconds
+        self.update_event = Clock.schedule_interval(self.update_status, 30)  # Update every 30 seconds
     
     def on_leave(self):
         if self.update_event:

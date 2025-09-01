@@ -24,7 +24,7 @@ class LoginScreen(MDScreen):
             text="SmartQueue",
             theme_text_color="Primary",
             size_hint_y=None,
-            height=dp(50),
+            height=dp(80),
             halign="center"
         )
         
@@ -47,6 +47,8 @@ class LoginScreen(MDScreen):
         login_btn = MDRaisedButton(
             text="LOGIN",
             size_hint_y=None,
+            size=(dp(120), dp(40)),
+            pos_hint={"center_x": 0.5},
             height=dp(40),
             on_release=self.login
         )
@@ -54,6 +56,8 @@ class LoginScreen(MDScreen):
         register_btn = MDFlatButton(
             text="Register New Account",
             size_hint_y=None,
+            size=(dp(120), dp(40)),
+            pos_hint={"center_x": 0.5},
             height=dp(40),
             on_release=self.go_to_register
         )

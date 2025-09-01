@@ -55,7 +55,7 @@ class AdminDashboardScreen(MDScreen):
     
     def on_enter(self):
         self.update_dashboard()
-        self.update_event = Clock.schedule_interval(self.update_dashboard, 3)  # Update every 3 seconds
+        self.update_event = Clock.schedule_interval(self.update_dashboard, 30)  # Update every 30 seconds
     
     def on_leave(self):
         if self.update_event:
