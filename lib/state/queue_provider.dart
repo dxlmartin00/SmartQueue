@@ -162,25 +162,52 @@ class EnhancedQueueProvider extends ChangeNotifier {
     _offlineActions.clear();
   }
   
+  // FIX: Enhanced profile loading with better error handling
   Future<void> loadProfile() async {
     await _executeWithErrorHandling(() async {
       final user = _supabase.auth.currentUser;
-      if (user != null) {
+      if (user == null) {
+        throw Exception('No authenticated user found');
+      }
+
+      try {
         final response = await _supabase
             .from('profiles')
             .select()
             .eq('id', user.id)
             .single();
+        
+        _currentProfile = Profile.fromJson(response);
+        debugPrint('Loaded profile: ${_currentProfile?.fullName} (${_currentProfile?.role})');
+      } catch (e) {
+        debugPrint('Profile not found, creating default profile');
+        // Create profile if it doesn't exist
+        await _supabase.from('profiles').insert({
+          'id': user.id,
+          'full_name': user.userMetadata?['full_name'] ?? 'User',
+          'role': 'user',
+        });
+        
+        // Load the newly created profile
+        final response = await _supabase
+            .from('profiles')
+            .select()
+            .eq('id', user.id)
+            .single();
+        
         _currentProfile = Profile.fromJson(response);
       }
     });
   }
   
+  // FIX: Enhanced service loading
   Future<void> loadServices() async {
     await _executeWithErrorHandling(() async {
+      debugPrint('Loading services...');
       final response = await _supabase.from('services').select().order('window');
       _services = response.map<Service>((json) => Service.fromJson(json)).toList();
       await _saveOfflineData();
+      debugPrint('Loaded ${_services.length} services');
     });
   }
   
@@ -208,8 +235,22 @@ class EnhancedQueueProvider extends ChangeNotifier {
     }
   }
   
+  // FIX: Enhanced ticket generation with better error handling and validation
   Future<String> generateTicket(String serviceId) async {
-    final service = _services.firstWhere((s) => s.id == serviceId);
+    if (_services.isEmpty) {
+      await loadServices();
+    }
+
+    final service = _services.where((s) => s.id == serviceId).firstOrNull;
+    if (service == null) {
+      throw Exception('Service not found');
+    }
+
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
     final prefix = service.window == 1 ? 'A' : 'B';
     
     if (_isOnline) {
@@ -229,7 +270,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
       final offlineTicket = QueueTicket(
         id: 'offline_${DateTime.now().millisecondsSinceEpoch}',
         serviceId: serviceId,
-        userId: _supabase.auth.currentUser!.id,
+        userId: user.id,
         ticketNumber: ticketNumber,
         status: 'waiting',
         queueDate: DateTime.now(),
@@ -245,23 +286,44 @@ class EnhancedQueueProvider extends ChangeNotifier {
     }
   }
   
+  // FIX: Enhanced ticket generation execution
   Future<String> _executeGenerateTicket(Map<String, dynamic> data) async {
     final serviceId = data['service_id'];
-    final service = _services.firstWhere((s) => s.id == serviceId);
-    final prefix = service.window == 1 ? 'A' : 'B';
     
+    if (_services.isEmpty) {
+      await loadServices();
+    }
+    
+    final service = _services.where((s) => s.id == serviceId).firstOrNull;
+    if (service == null) {
+      throw Exception('Service not found: $serviceId');
+    }
+    
+    final prefix = service.window == 1 ? 'A' : 'B';
+    final today = DateTime.now().toIso8601String().split('T')[0];
+    
+    // Get count of tickets for this service today
     final countResponse = await _supabase
         .from('queues')
-        .select()
+        .select('id')
         .eq('service_id', serviceId)
-        .eq('queue_date', DateTime.now().toIso8601String().split('T')[0]);
+        .eq('queue_date', today);
     
-    final ticketNumber = '$prefix-${(countResponse.length + 1).toString().padLeft(3, '0')}';
+    final count = countResponse.length;
+    final ticketNumber = '$prefix-${(count + 1).toString().padLeft(3, '0')}';
+    
+    debugPrint('Generating ticket: $ticketNumber for service: ${service.name}');
+    
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
     
     await _supabase.from('queues').insert({
       'service_id': serviceId,
-      'user_id': _supabase.auth.currentUser!.id,
+      'user_id': user.id,
       'ticket_number': ticketNumber,
+      'queue_date': today,
     });
     
     await loadUserTickets();
@@ -272,29 +334,82 @@ class EnhancedQueueProvider extends ChangeNotifier {
     await _executeWithErrorHandling(() async {
       final user = _supabase.auth.currentUser;
       if (user != null) {
+        final today = DateTime.now().toIso8601String().split('T')[0];
         final response = await _supabase
             .from('queues')
-            .select('*, services(*)')
+            .select('*')
             .eq('user_id', user.id)
-            .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
+            .eq('queue_date', today)
             .order('created_at');
         
         _userTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
         await _saveOfflineData();
+        debugPrint('Loaded ${_userTickets.length} user tickets');
       }
     });
   }
   
+  // FIX: Enhanced admin ticket loading with better service join
   Future<void> loadAdminTickets(int window) async {
     await _executeWithErrorHandling(() async {
-      final response = await _supabase
-          .from('queues')
-          .select('*, services(*)')
-          .eq('services.window', window)
-          .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
-          .order('created_at');
+      final today = DateTime.now().toIso8601String().split('T')[0];
       
-      _adminTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
+      try {
+        // Use a single query with join to get tickets for the specific window
+        final response = await _supabase
+            .from('queues')
+            .select('''
+              *,
+              services!inner (
+                id,
+                name,
+                window
+              )
+            ''')
+            .eq('services.window', window)
+            .eq('queue_date', today)
+            .order('created_at');
+        
+        _adminTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
+        debugPrint('Loaded ${_adminTickets.length} admin tickets for window $window');
+        
+      } catch (e) {
+        debugPrint('Join query failed, trying fallback method: $e');
+        
+        // Fallback: Get services first, then tickets individually
+        final windowServices = await _supabase
+            .from('services')
+            .select('id')
+            .eq('window', window);
+        
+        if (windowServices.isEmpty) {
+          _adminTickets = [];
+          debugPrint('No services found for window $window');
+          return;
+        }
+        
+        final allTickets = <QueueTicket>[];
+        
+        for (final service in windowServices) {
+          try {
+            final serviceTickets = await _supabase
+                .from('queues')
+                .select('*')
+                .eq('service_id', service['id'])
+                .eq('queue_date', today);
+            
+            final tickets = serviceTickets.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
+            allTickets.addAll(tickets);
+          } catch (serviceError) {
+            debugPrint('Error loading tickets for service ${service['id']}: $serviceError');
+          }
+        }
+        
+        // Sort by creation time
+        allTickets.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        _adminTickets = allTickets;
+        debugPrint('Loaded ${_adminTickets.length} admin tickets for window $window (fallback)');
+      }
     });
   }
   
@@ -315,13 +430,19 @@ class EnhancedQueueProvider extends ChangeNotifier {
   }
   
   Future<void> _executeUpdateServiceStatus(Map<String, dynamic> data) async {
+    final currentNumber = data['current_number'];
+    final updateData = {
+      'current_number': currentNumber.isEmpty ? null : currentNumber,
+      'updated_at': DateTime.now().toIso8601String()
+    };
+    
     await _supabase
         .from('service_status')
-        .update({
-          'current_number': data['current_number'],
-          'updated_at': DateTime.now().toIso8601String()
-        })
+        .update(updateData)
         .eq('window', data['window']);
+        
+    // Refresh service statuses
+    await loadServiceStatuses();
   }
   
   Future<void> updateTicketStatus(String ticketId, String status) async {
@@ -379,14 +500,37 @@ class EnhancedQueueProvider extends ChangeNotifier {
     return await _executeWithErrorHandling(() async {
       final today = DateTime.now().toIso8601String().split('T')[0];
       
-      // Get analytics from the view we created
-      final analytics = await _supabase
-          .from('queue_analytics')
-          .select()
-          .eq('date', today)
-          .single();
-          
-      return analytics;
+      try {
+        // Try to get analytics from the view we created
+        final analytics = await _supabase
+            .from('queue_analytics')
+            .select()
+            .eq('date', today)
+            .single();
+            
+        return analytics;
+      } catch (e) {
+        // Fallback to manual calculation
+        debugPrint('Analytics view not available, calculating manually');
+        
+        final tickets = await _supabase
+            .from('queues')
+            .select('*, services(*)')
+            .eq('queue_date', today);
+            
+        final totalTickets = tickets.length;
+        final completedTickets = tickets.where((t) => t['status'] == 'done').length;
+        final window1Count = tickets.where((t) => t['services']?['window'] == 1).length;
+        final window2Count = tickets.where((t) => t['services']?['window'] == 2).length;
+        
+        return {
+          'total_tickets': totalTickets,
+          'completed_tickets': completedTickets,
+          'avg_wait_minutes': 0,
+          'window_1_count': window1Count,
+          'window_2_count': window2Count,
+        };
+      }
     }) ?? {
       'total_tickets': 0,
       'completed_tickets': 0,
@@ -396,6 +540,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
     };
   }
   
+  // FIX: Enhanced error handling with more specific error messages
   Future<T?> _executeWithErrorHandling<T>(Future<T> Function() operation) async {
     try {
       _setLoading(true);
@@ -411,13 +556,22 @@ class EnhancedQueueProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('Operation failed: $e');
       
-      if (e.toString().contains('network') || 
-          e.toString().contains('connection') ||
-          e.toString().contains('timeout')) {
+      String errorMessage = 'An error occurred';
+      
+      if (e is PostgrestException) {
+        errorMessage = 'Database error: ${e.message}';
+      } else if (e.toString().contains('network') || 
+                 e.toString().contains('connection') ||
+                 e.toString().contains('timeout')) {
+        errorMessage = 'Network connection error';
         _setOnlineStatus(false);
+      } else if (e.toString().contains('not found')) {
+        errorMessage = 'Requested data not found';
+      } else if (e.toString().contains('permission')) {
+        errorMessage = 'Permission denied';
       }
       
-      _setError(e.toString());
+      _setError(errorMessage);
       return null;
     } finally {
       _setLoading(false);

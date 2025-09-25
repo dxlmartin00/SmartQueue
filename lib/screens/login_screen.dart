@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'signup_screen.dart'; // Import the signup screen
+import 'package:smartqueue/debug/admin_debug_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -209,6 +210,17 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               SizedBox(height: 20),
+
+              FloatingActionButton(
+                backgroundColor: Colors.red,
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const AdminDebugScreen()),
+                  );
+                },
+                child: const Icon(Icons.bug_report),
+              ),
 
               // Sign Up Button
               SizedBox(
