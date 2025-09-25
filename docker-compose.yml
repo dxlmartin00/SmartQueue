@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  supabase-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: smartqueue_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+  
+  supabase-api:
+    image: supabase/gotrue:latest
+    depends_on:
+      - supabase-db
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@supabase-db:5432/smartqueue_dev
+      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_URI_ALLOW_LIST: http://localhost:3000
+      GOTRUE_JWT_SECRET: your-jwt-secret
+    ports:
+      - "9999:9999"
+
+volumes:
+  postgres_data:
