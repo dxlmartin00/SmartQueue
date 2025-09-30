@@ -1,17 +1,18 @@
+// lib/screens/analytics_screen.dart
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import '../state/queue_provider.dart';
 
 class AnalyticsScreen extends StatefulWidget {
-  const AnalyticsScreen({super.key});
+  final int? specificWindow; // If provided, show only this window's analytics
+
+  const AnalyticsScreen({super.key, this.specificWindow});
 
   @override
-  _AnalyticsScreenState createState() => _AnalyticsScreenState();
+  State<AnalyticsScreen> createState() => _AnalyticsScreenState();
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  Map<String, dynamic> _analytics = {};
-  bool _isLoading = false;
-
   @override
   void initState() {
     super.initState();
@@ -19,168 +20,390 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Future<void> _loadAnalytics() async {
-    setState(() => _isLoading = true);
+    final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
+    await provider.loadAdminTickets(widget.specificWindow ?? 1);
     
-    try {
-      final supabase = Supabase.instance.client;
-      final today = DateTime.now().toIso8601String().split('T')[0];
-
-      // Students per window
-      final windowStats = await supabase
-          .from('queues')
-          .select('services!inner(window)')
-          .eq('queue_date', today);
-
-      // Total students served
-      final totalServed = await supabase
-          .from('queues')
-          .select()
-          .eq('queue_date', today)
-          .eq('status', 'done');
-
-      // Average wait time (simplified calculation)
-      final completedTickets = await supabase
-          .from('queues')
-          .select('created_at, time_called')
-          .eq('queue_date', today)
-          .not('time_called', 'is', null);
-
-      double avgWaitTime = 0;
-      if (completedTickets.isNotEmpty) {
-        double totalWaitMinutes = 0;
-        for (var ticket in completedTickets) {
-          final created = DateTime.parse(ticket['created_at']);
-          final called = DateTime.parse(ticket['time_called']);
-          totalWaitMinutes += called.difference(created).inMinutes;
-        }
-        avgWaitTime = totalWaitMinutes / completedTickets.length;
-      }
-
-      setState(() {
-        _analytics = {
-          'window1Count': windowStats.where((q) => q['services']['window'] == 1).length,
-          'window2Count': windowStats.where((q) => q['services']['window'] == 2).length,
-          'avgWaitTime': avgWaitTime,
-          'totalServed': totalServed.length,
-          'totalQueued': windowStats.length,
-        };
-      });
-    } catch (error) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading analytics: $error')),
-      );
+    // If no specific window, load both
+    if (widget.specificWindow == null) {
+      await provider.loadAdminTickets(2);
     }
-    
-    setState(() => _isLoading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Today\'s Analytics',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              IconButton(
-                icon: _isLoading ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ) : const Icon(Icons.refresh),
-                onPressed: _isLoading ? null : _loadAnalytics,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+    return Consumer<EnhancedQueueProvider>(
+      builder: (context, provider, child) {
+        // Filter tickets based on window
+        final allTickets = provider.adminTickets;
+        final todayTickets = allTickets.where((t) {
+          final isToday = t.queueDate.day == DateTime.now().day &&
+              t.queueDate.month == DateTime.now().month &&
+              t.queueDate.year == DateTime.now().year;
           
-          // Stats Cards
-          Expanded(
-            child: GridView.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              children: [
-                _buildStatCard(
-                  'Total Queued',
-                  _analytics['totalQueued']?.toString() ?? '0',
-                  Icons.people_outline,
-                  Colors.blue,
-                ),
-                _buildStatCard(
-                  'Total Served',
-                  _analytics['totalServed']?.toString() ?? '0',
-                  Icons.people,
-                  Colors.green,
-                ),
-                _buildStatCard(
-                  'Avg Wait Time',
-                  '${_analytics['avgWaitTime']?.toStringAsFixed(1) ?? '0'}m',
-                  Icons.timer,
-                  Colors.orange,
-                ),
-                _buildStatCard(
-                  'Success Rate',
-                  _analytics['totalQueued'] != null && _analytics['totalQueued'] > 0
-                      ? '${((_analytics['totalServed'] / _analytics['totalQueued']) * 100).toStringAsFixed(1)}%'
-                      : '0%',
-                  Icons.check_circle,
-                  Colors.purple,
-                ),
-                _buildStatCard(
-                  'Window 1',
-                  _analytics['window1Count']?.toString() ?? '0',
-                  Icons.looks_one,
-                  Colors.indigo,
-                ),
-                _buildStatCard(
-                  'Window 2',
-                  _analytics['window2Count']?.toString() ?? '0',
-                  Icons.looks_two,
-                  Colors.teal,
-                ),
-              ],
+          if (widget.specificWindow == null) return isToday;
+          
+          // Get service for this ticket
+          final service = provider.services.firstWhere(
+            (s) => s.id == t.serviceId,
+            orElse: () => provider.services.first,
+          );
+          
+          return isToday && service.window == widget.specificWindow;
+        }).toList();
+
+        final waitingCount = todayTickets.where((t) => t.status == 'waiting').length;
+        final servingCount = todayTickets.where((t) => t.status == 'serving').length;
+        final doneCount = todayTickets.where((t) => t.status == 'done').length;
+        final totalCount = todayTickets.length;
+
+        // Calculate average wait time for completed tickets
+        final completedTickets = todayTickets.where((t) => 
+          t.status == 'done' && t.timeCalled != null && t.finishedAt != null
+        ).toList();
+        
+        final avgWaitMinutes = completedTickets.isEmpty
+            ? 0
+            : completedTickets.map((t) {
+                final waitTime = t.timeCalled!.difference(t.createdAt).inMinutes;
+                return waitTime;
+              }).reduce((a, b) => a + b) / completedTickets.length;
+
+        final avgServiceMinutes = completedTickets.isEmpty
+            ? 0
+            : completedTickets.map((t) {
+                final serviceTime = t.finishedAt!.difference(t.timeCalled!).inMinutes;
+                return serviceTime;
+              }).reduce((a, b) => a + b) / completedTickets.length;
+
+        return Scaffold(
+          body: RefreshIndicator(
+            onRefresh: _loadAnalytics,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.analytics,
+                        size: 32,
+                        color: widget.specificWindow == 1 
+                            ? Colors.blue.shade600 
+                            : widget.specificWindow == 2
+                                ? Colors.green.shade600
+                                : Colors.purple.shade600,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.specificWindow != null
+                                  ? 'Window ${widget.specificWindow} Analytics'
+                                  : 'Analytics Dashboard',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              'Today\'s Performance',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Summary Cards
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 16,
+                    childAspectRatio: 1.5,
+                    children: [
+                      _buildStatCard(
+                        'Total Tickets',
+                        totalCount.toString(),
+                        Icons.confirmation_number,
+                        Colors.blue,
+                      ),
+                      _buildStatCard(
+                        'Completed',
+                        doneCount.toString(),
+                        Icons.check_circle,
+                        Colors.green,
+                      ),
+                      _buildStatCard(
+                        'In Progress',
+                        servingCount.toString(),
+                        Icons.sync,
+                        Colors.orange,
+                      ),
+                      _buildStatCard(
+                        'Waiting',
+                        waitingCount.toString(),
+                        Icons.schedule,
+                        Colors.purple,
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Time Metrics
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildTimeCard(
+                          'Avg. Wait Time',
+                          '${avgWaitMinutes.toStringAsFixed(1)} min',
+                          Icons.hourglass_empty,
+                          Colors.amber,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildTimeCard(
+                          'Avg. Service Time',
+                          '${avgServiceMinutes.toStringAsFixed(1)} min',
+                          Icons.timer,
+                          Colors.teal,
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Services Breakdown
+                  const Text(
+                    'Services Breakdown',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  _buildServicesBreakdown(provider, todayTickets),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Completion Rate
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.trending_up, color: Colors.green.shade600),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Completion Rate',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          LinearProgressIndicator(
+                            value: totalCount > 0 ? doneCount / totalCount : 0,
+                            minHeight: 10,
+                            backgroundColor: Colors.grey.shade300,
+                            valueColor: AlwaysStoppedAnimation(Colors.green.shade600),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${totalCount > 0 ? ((doneCount / totalCount) * 100).toStringAsFixed(1) : 0}% Complete',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
     return Card(
-      elevation: 4,
+      elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 40, color: color),
-            const SizedBox(height: 12),
+            Icon(icon, size: 32, color: color),
+            const SizedBox(height: 8),
             Text(
               value,
               style: TextStyle(
-                fontSize: 24,
+                fontSize: 28,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
             ),
             const SizedBox(height: 4),
             Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-              ),
+              label,
               textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeCard(String label, String value, IconData icon, Color color) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Icon(icon, size: 28, color: color),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildServicesBreakdown(EnhancedQueueProvider provider, List tickets) {
+    // Group tickets by service
+    final serviceGroups = <String, List>{};
+    
+    for (var ticket in tickets) {
+      if (!serviceGroups.containsKey(ticket.serviceId)) {
+        serviceGroups[ticket.serviceId] = [];
+      }
+      serviceGroups[ticket.serviceId]!.add(ticket);
+    }
+
+    if (serviceGroups.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(Icons.info_outline, size: 48, color: Colors.grey.shade400),
+                const SizedBox(height: 8),
+                Text(
+                  'No tickets today',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: serviceGroups.entries.map((entry) {
+            final service = provider.services.firstWhere(
+              (s) => s.id == entry.key,
+              orElse: () => provider.services.first,
+            );
+            final tickets = entry.value;
+            final completed = tickets.where((t) => t.status == 'done').length;
+            
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          service.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${tickets.length} tickets',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: LinearProgressIndicator(
+                      value: tickets.isNotEmpty ? completed / tickets.length : 0,
+                      backgroundColor: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$completed/${tickets.length}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
         ),
       ),
     );

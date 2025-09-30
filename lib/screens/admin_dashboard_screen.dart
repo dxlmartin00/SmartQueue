@@ -1,3 +1,4 @@
+// lib/screens/admin_dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,14 +13,10 @@ class AdminDashboardScreen extends StatefulWidget {
   _AdminDashboardScreenState createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> 
-    with SingleTickerProviderStateMixin {
-  TabController? _tabController;
-
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
     provider.loadServices();
     provider.loadServiceStatuses();
@@ -28,38 +25,114 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => Supabase.instance.client.auth.signOut(),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Window 1'),
-            Tab(text: 'Window 2'),
-            Tab(text: 'Analytics'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: const [
-          QueueControlScreen(serviceWindow: 1),
-          QueueControlScreen(serviceWindow: 2),
-          AnalyticsScreen(),
-        ],
-      ),
-    );
-  }
+    return Consumer<EnhancedQueueProvider>(
+      builder: (context, provider, child) {
+        final profile = provider.currentProfile;
+        
+        // Safety check
+        if (profile == null || profile.role != 'admin' || profile.assignedWindow == null) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error, size: 64, color: Colors.red),
+                  const SizedBox(height: 16),
+                  const Text('Unauthorized Access'),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () => Supabase.instance.client.auth.signOut(),
+                    child: const Text('Sign Out'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
 
-  @override
-  void dispose() {
-    _tabController?.dispose();
-    super.dispose();
+        final assignedWindow = profile.assignedWindow!;
+        final windowColor = assignedWindow == 1 ? Colors.blue : Colors.green;
+
+        return Scaffold(
+          appBar: AppBar(
+            backgroundColor: windowColor,
+            title: Row(
+              children: [
+                Icon(Icons.window, color: Colors.white),
+                const SizedBox(width: 8),
+                Text(
+                  'Window $assignedWindow Admin Dashboard',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+            actions: [
+              // Admin Info Badge
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      profile.fullName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white),
+                onPressed: () => Supabase.instance.client.auth.signOut(),
+                tooltip: 'Sign Out',
+              ),
+            ],
+          ),
+          body: DefaultTabController(
+            length: 2,
+            child: Column(
+              children: [
+                Container(
+                  color: windowColor,
+                  child: TabBar(
+                    indicatorColor: Colors.white,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white70,
+                    tabs: const [
+                      Tab(
+                        icon: Icon(Icons.queue),
+                        text: 'Queue Control',
+                      ),
+                      Tab(
+                        icon: Icon(Icons.analytics),
+                        text: 'Analytics',
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      // Only show queue control for assigned window
+                      QueueControlScreen(serviceWindow: assignedWindow),
+                      // Analytics for assigned window only
+                      AnalyticsScreen(specificWindow: assignedWindow),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
