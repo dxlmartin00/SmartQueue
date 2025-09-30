@@ -13,8 +13,8 @@ class TicketScreen extends StatelessWidget {
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
         final status = provider.serviceStatuses.firstWhere(
-          (s) => s.window == (ticket.serviceId.startsWith('A') ? 1 : 2), // Assuming service ID pattern
-          orElse: () => ServiceStatus(window: 1, updatedAt: DateTime.now()),
+          (s) => s.serviceWindow == (ticket.serviceId.startsWith('A') ? 1 : 2), // Assuming service ID pattern
+          orElse: () => ServiceStatus(serviceWindow: 1, updatedAt: DateTime.now()),
         );
 
         return Scaffold(

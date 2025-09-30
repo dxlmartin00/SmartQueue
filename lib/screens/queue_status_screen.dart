@@ -4,9 +4,9 @@ import '../state/queue_provider.dart';
 import '../models/queue.dart';
 
 class QueueStatusScreen extends StatelessWidget {
-  final int window;
+  final int serviceWindow;
 
-  const QueueStatusScreen({super.key, required this.window});
+  const QueueStatusScreen({super.key, required this.serviceWindow});
 
   @override
   Widget build(BuildContext context) {
@@ -17,13 +17,13 @@ class QueueStatusScreen extends StatelessWidget {
             .toList();
         
         final status = provider.serviceStatuses.firstWhere(
-          (s) => s.window == window,
-          orElse: () => ServiceStatus(window: window, updatedAt: DateTime.now()),
+          (s) => s.serviceWindow == serviceWindow,
+          orElse: () => ServiceStatus(serviceWindow: serviceWindow, updatedAt: DateTime.now()),
         );
 
         return Scaffold(
           appBar: AppBar(
-            title: Text('Queue Status - Window $window'),
+            title: Text('Queue Status - Window $serviceWindow'),
           ),
           body: Padding(
             padding: const EdgeInsets.all(16),

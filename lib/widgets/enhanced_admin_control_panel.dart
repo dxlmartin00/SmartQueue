@@ -5,11 +5,11 @@ import '../models/queue.dart';
 import '../models/service.dart';
 
 class EnhancedAdminControlPanel extends StatefulWidget {
-  final int window;
+  final int serviceWindow;
   
   const EnhancedAdminControlPanel({
     Key? key,
-    required this.window,
+    required this.serviceWindow,
   }) : super(key: key);
 
   @override
@@ -30,7 +30,7 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
     super.initState();
     _setupAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<EnhancedQueueProvider>().loadAdminTickets(widget.window);
+      context.read<EnhancedQueueProvider>().loadAdminTickets(widget.serviceWindow);
     });
   }
 
@@ -67,9 +67,9 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
         final status = provider.serviceStatuses.firstWhere(
-          (s) => s.window == widget.window,
+          (s) => s.serviceWindow == widget.serviceWindow,
           orElse: () => ServiceStatus(
-            window: widget.window,
+            serviceWindow: widget.serviceWindow,
             updatedAt: DateTime.now(),
           ),
         );
@@ -160,7 +160,7 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Window ${widget.window}',
+                        'Window ${widget.serviceWindow}',
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -440,7 +440,7 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () => provider.loadAdminTickets(widget.window),
+                  onPressed: () => provider.loadAdminTickets(widget.serviceWindow),
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('Refresh'),
                 ),
@@ -592,8 +592,8 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
   void _callNext(QueueTicket ticket, EnhancedQueueProvider provider) {
     _animateButtonPress(() async {
       await provider.updateTicketStatus(ticket.id, 'serving');
-      await provider.updateServiceStatus(widget.window, ticket.ticketNumber);
-      await provider.loadAdminTickets(widget.window);
+      await provider.updateServiceStatus(widget.serviceWindow, ticket.ticketNumber);
+      await provider.loadAdminTickets(widget.serviceWindow);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -635,7 +635,7 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
   void _markComplete(EnhancedQueueProvider provider) {
     _animateButtonPress(() async {
       final status = provider.serviceStatuses.firstWhere(
-        (s) => s.window == widget.window,
+        (s) => s.serviceWindow == widget.serviceWindow,
       );
       
       final currentTicket = provider.adminTickets.firstWhere(
@@ -643,8 +643,8 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
       );
       
       await provider.updateTicketStatus(currentTicket.id, 'done');
-      await provider.updateServiceStatus(widget.window, '');
-      await provider.loadAdminTickets(widget.window);
+      await provider.updateServiceStatus(widget.serviceWindow, '');
+      await provider.loadAdminTickets(widget.serviceWindow);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -686,7 +686,7 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
   void _performSkip(EnhancedQueueProvider provider) {
     _animateButtonPress(() async {
       final status = provider.serviceStatuses.firstWhere(
-        (s) => s.window == widget.window,
+        (s) => s.serviceWindow == widget.serviceWindow,
       );
       
       final currentTicket = provider.adminTickets.firstWhere(
@@ -694,8 +694,8 @@ class _EnhancedAdminControlPanelState extends State<EnhancedAdminControlPanel>
       );
       
       await provider.updateTicketStatus(currentTicket.id, 'skipped');
-      await provider.updateServiceStatus(widget.window, '');
-      await provider.loadAdminTickets(widget.window);
+      await provider.updateServiceStatus(widget.serviceWindow, '');
+      await provider.loadAdminTickets(widget.serviceWindow);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

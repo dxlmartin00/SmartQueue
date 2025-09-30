@@ -49,8 +49,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       body: TabBarView(
         controller: _tabController,
         children: const [
-          QueueControlScreen(window: 1),
-          QueueControlScreen(window: 2),
+          QueueControlScreen(serviceWindow: 1),
+          QueueControlScreen(serviceWindow: 2),
           AnalyticsScreen(),
         ],
       ),

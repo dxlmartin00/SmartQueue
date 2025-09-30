@@ -3,19 +3,19 @@ import 'package:provider/provider.dart';
 import '../state/queue_provider.dart';
 
 class ServiceSelectionScreen extends StatelessWidget {
-  final int window;
+  final int serviceWindow;
 
-  const ServiceSelectionScreen({super.key, required this.window});
+  const ServiceSelectionScreen({super.key, required this.serviceWindow});
 
   @override
   Widget build(BuildContext context) {
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
-        final services = provider.services.where((s) => s.window == window).toList();
+        final services = provider.services.where((s) => s.window == serviceWindow).toList();
         
         return Scaffold(
           appBar: AppBar(
-            title: Text('Select Service - Window $window'),
+            title: Text('Select Service - Window $serviceWindow'),
           ),
           body: ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -26,7 +26,7 @@ class ServiceSelectionScreen extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
                   title: Text(service.name),
-                  subtitle: Text('Window $window'),
+                  subtitle: Text('Window $serviceWindow'),
                   trailing: ElevatedButton(
                     onPressed: () async {
                       try {

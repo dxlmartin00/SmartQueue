@@ -69,7 +69,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                ServiceStatusCard(window: 1, services: window1Services),
+                ServiceStatusCard(serviceWindow: 1, services: window1Services),
                 const SizedBox(height: 16),
                 
                 // Window 2 Services
@@ -78,7 +78,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                ServiceStatusCard(window: 2, services: window2Services),
+                ServiceStatusCard(serviceWindow: 2, services: window2Services),
               ],
             ),
           ),
@@ -89,18 +89,18 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
 }
 
 class ServiceStatusCard extends StatelessWidget {
-  final int window;
+  final int serviceWindow;
   final List<Service> services;
 
-  const ServiceStatusCard({super.key, required this.window, required this.services});
+  const ServiceStatusCard({super.key, required this.serviceWindow, required this.services});
 
   @override
   Widget build(BuildContext context) {
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
         final status = provider.serviceStatuses.firstWhere(
-          (s) => s.window == window,
-          orElse: () => ServiceStatus(window: window, updatedAt: DateTime.now()),
+          (s) => s.serviceWindow == serviceWindow,
+          orElse: () => ServiceStatus(serviceWindow: serviceWindow, updatedAt: DateTime.now()),
         );
         
         return Card(
@@ -113,7 +113,7 @@ class ServiceStatusCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Window $window',
+                      'Window $serviceWindow',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     Text(

@@ -9,7 +9,7 @@ class Service {
     return Service(
       id: json['id'],
       name: json['name'],
-      window: json['window'],
+      window: json['service_window'],
     );
   }
 }

@@ -37,15 +37,19 @@ class QueueTicket {
 }
 
 class ServiceStatus {
-  final int window;
+  final int serviceWindow;  // Changed from 'window' to 'serviceWindow'
   final String? currentNumber;
   final DateTime updatedAt;
 
-  ServiceStatus({required this.window, this.currentNumber, required this.updatedAt});
+  ServiceStatus({
+    required this.serviceWindow,  // Changed parameter name
+    this.currentNumber, 
+    required this.updatedAt
+  });
 
   factory ServiceStatus.fromJson(Map<String, dynamic> json) {
     return ServiceStatus(
-      window: json['window'],
+      serviceWindow: json['service_window'],  // Changed from 'window' to 'service_window'
       currentNumber: json['current_number'],
       updatedAt: DateTime.parse(json['updated_at']),
     );

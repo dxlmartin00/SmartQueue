@@ -4,9 +4,9 @@ import '../state/queue_provider.dart';
 import '../models/queue.dart';
 
 class QueueControlScreen extends StatefulWidget {
-  final int window;
+  final int serviceWindow;
 
-  const QueueControlScreen({super.key, required this.window});
+  const QueueControlScreen({super.key, required this.serviceWindow});
 
   @override
   _QueueControlScreenState createState() => _QueueControlScreenState();
@@ -16,7 +16,7 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
   @override
   void initState() {
     super.initState();
-    Provider.of<EnhancedQueueProvider>(context, listen: false).loadAdminTickets(widget.window);
+    Provider.of<EnhancedQueueProvider>(context, listen: false).loadAdminTickets(widget.serviceWindow);
   }
 
   @override
@@ -24,8 +24,8 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
         final status = provider.serviceStatuses.firstWhere(
-          (s) => s.window == widget.window,
-          orElse: () => ServiceStatus(window: widget.window, updatedAt: DateTime.now()),
+          (s) => s.serviceWindow == widget.serviceWindow,
+          orElse: () => ServiceStatus(serviceWindow: widget.serviceWindow, updatedAt: DateTime.now()),
         );
         
         final waitingTickets = provider.adminTickets
@@ -150,27 +150,27 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
 
   Future<void> _callNext(EnhancedQueueProvider provider, QueueTicket ticket) async {
     await provider.updateTicketStatus(ticket.id, 'serving');
-    await provider.updateServiceStatus(widget.window, ticket.ticketNumber);
-    provider.loadAdminTickets(widget.window);
+    await provider.updateServiceStatus(widget.serviceWindow, ticket.ticketNumber);
+    provider.loadAdminTickets(widget.serviceWindow);
   }
 
   Future<void> _markDone(EnhancedQueueProvider provider) async {
-    final status = provider.serviceStatuses.firstWhere((s) => s.window == widget.window);
+    final status = provider.serviceStatuses.firstWhere((s) => s.serviceWindow == widget.serviceWindow);
     final currentTicket = provider.adminTickets
         .firstWhere((t) => t.ticketNumber == status.currentNumber && t.status == 'serving');
     
     await provider.updateTicketStatus(currentTicket.id, 'done');
-    await provider.updateServiceStatus(widget.window, '');
-    provider.loadAdminTickets(widget.window);
+    await provider.updateServiceStatus(widget.serviceWindow, '');
+    provider.loadAdminTickets(widget.serviceWindow);
   }
 
   Future<void> _skipCurrent(EnhancedQueueProvider provider) async {
-    final status = provider.serviceStatuses.firstWhere((s) => s.window == widget.window);
+    final status = provider.serviceStatuses.firstWhere((s) => s.serviceWindow == widget.serviceWindow);
     final currentTicket = provider.adminTickets
         .firstWhere((t) => t.ticketNumber == status.currentNumber && t.status == 'serving');
     
     await provider.updateTicketStatus(currentTicket.id, 'skipped');
-    await provider.updateServiceStatus(widget.window, '');
-    provider.loadAdminTickets(widget.window);
+    await provider.updateServiceStatus(widget.serviceWindow, '');
+    provider.loadAdminTickets(widget.serviceWindow);
   }
 }

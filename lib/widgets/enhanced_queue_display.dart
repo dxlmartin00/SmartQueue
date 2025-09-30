@@ -175,9 +175,9 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
     Color color,
   ) {
     final status = provider.serviceStatuses.firstWhere(
-      (s) => s.window == window,
+      (s) => s.serviceWindow == window,
       orElse: () => ServiceStatus(
-        window: window,
+        serviceWindow: window,
         updatedAt: DateTime.now(),
       ),
     );
