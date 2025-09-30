@@ -62,7 +62,8 @@ class SupabaseService {
     // Students per window
     final windowStats = await _client
         .from('queues')
-        .select('services!inner(window)')
+        // Changed from 'services!inner(window)' to 'services!inner(service_window)'
+        .select('services!inner(service_window)')
         .eq('queue_date', today);
 
     // Total served
@@ -73,8 +74,9 @@ class SupabaseService {
         .eq('status', 'done');
 
     return {
-      'window1Count': windowStats.where((q) => q['services']['window'] == 1).length,
-      'window2Count': windowStats.where((q) => q['services']['window'] == 2).length,
+      // Changed from q['services']['window'] to q['services']['service_window']
+      'window1Count': windowStats.where((q) => q['services']['service_window'] == 1).length,
+      'window2Count': windowStats.where((q) => q['services']['service_window'] == 2).length,
       'totalServed': totalServed.length,
     };
   }

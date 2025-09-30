@@ -177,7 +177,8 @@ class EnhancedQueueProvider extends ChangeNotifier {
   
   Future<void> loadServices() async {
     await _executeWithErrorHandling(() async {
-      final response = await _supabase.from('services').select().order('window');
+      // Changed from .order('window') to .order('service_window')
+      final response = await _supabase.from('services').select().order('service_window');
       _services = response.map<Service>((json) => Service.fromJson(json)).toList();
       await _saveOfflineData();
     });
@@ -289,7 +290,8 @@ class EnhancedQueueProvider extends ChangeNotifier {
       final response = await _supabase
           .from('queues')
           .select('*, services(*)')
-          .eq('services.window', window)
+          // Changed from .eq('services.window', window) to .eq('services.service_window', window)
+          .eq('services.service_window', window)
           .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
           .order('created_at');
       

@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../state/queue_provider.dart';
 import '../models/service.dart';
 import '../models/queue.dart';
-//import '../widgets/enhanced_queue_display.dart';
+import 'service_selection_screen.dart';
 
 class UserHomeScreen extends StatefulWidget {
   const UserHomeScreen({super.key});
@@ -41,7 +41,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               ),
             ],
           ),
-          body: Padding(
+          body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,23 +127,52 @@ class ServiceStatusCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
+                
+                // Quick service buttons (original inline functionality)
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: services.map((service) => ElevatedButton(
                     onPressed: () async {
                       try {
                         await provider.generateTicket(service.id);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ticket generated for ${service.name}')),
-                        );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Ticket generated for ${service.name}')),
+                          );
+                        }
                       } catch (error) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error: $error')),
-                        );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $error')),
+                          );
+                        }
                       }
                     },
                     child: Text(service.name),
                   )).toList(),
+                ),
+                
+                const SizedBox(height: 12),
+                
+                // Add navigation button to ServiceSelectionScreen for testing
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ServiceSelectionScreen(serviceWindow: serviceWindow),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.arrow_forward),
+                    label: Text('Go to Window $serviceWindow Selection Screen'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.blue,
+                    ),
+                  ),
                 ),
               ],
             ),

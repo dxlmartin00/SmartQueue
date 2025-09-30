@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'state/queue_provider.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/user_home_screen.dart';
+import 'screens/service_selection_screen.dart';
 import 'debug/admin_debug_screen.dart';
 
 void main() async {
@@ -55,6 +56,11 @@ class SmartQueueApp extends StatelessWidget {
         ),
       ),
       home: const AuthWrapper(),
+      // Add named routes for testing
+      routes: {
+        '/service-selection-1': (context) => const ServiceSelectionScreen(serviceWindow: 1),
+        '/service-selection-2': (context) => const ServiceSelectionScreen(serviceWindow: 2),
+      },
     );
   }
 }
@@ -101,7 +107,7 @@ class RoleBasedHome extends StatelessWidget {
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Loading your profile...'),
+                  Text('Loading profile...'),
                 ],
               ),
             ),
@@ -109,27 +115,19 @@ class RoleBasedHome extends StatelessWidget {
         }
         
         if (snapshot.hasError) {
-          if (kDebugMode) {
-            print('❌ Error loading user data: ${snapshot.error}');
-          }
-          
           return Scaffold(
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error, size: 64, color: Colors.red),
+                  const Icon(Icons.error, size: 48, color: Colors.red),
                   const SizedBox(height: 16),
-                  const Text('Failed to load user data'),
-                  const SizedBox(height: 8),
-                  Text(
-                    snapshot.error.toString(),
-                    style: const TextStyle(color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
+                  Text('Error: ${snapshot.error}'),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () => Supabase.instance.client.auth.signOut(),
+                    onPressed: () {
+                      Supabase.instance.client.auth.signOut();
+                    },
                     child: const Text('Sign Out'),
                   ),
                 ],
@@ -138,95 +136,24 @@ class RoleBasedHome extends StatelessWidget {
           );
         }
         
-        return Consumer<EnhancedQueueProvider>(
-          builder: (context, provider, child) {
-            final role = provider.currentProfile?.role ?? 'user';
-            final userName = provider.currentProfile?.fullName ?? 'User';
-
-            if (kDebugMode) {
-              print('🎭 Current user role: $role');
-              print('👤 Current user name: $userName');
-              print('🔍 Profile object: ${provider.currentProfile}');
-            }
-            
-            // Add debug button in debug mode
-            Widget homeScreen;
-            if (role == 'admin') {
-              if (kDebugMode) {
-                print('🔧 Loading AdminDashboardScreen');
-              }
-              homeScreen = const AdminDashboardScreen();
-            } else {
-              if (kDebugMode) {
-                print('👨‍🎓 Loading UserHomeScreen');
-              }
-              homeScreen = const UserHomeScreen();
-            }
-            
-            // Wrap with debug button if in debug mode
-            if (kDebugMode) {
-              return Stack(
-                children: [
-                  homeScreen,
-                  Positioned(
-                    top: 50,
-                    right: 16,
-                    child: FloatingActionButton.small(
-                      heroTag: "admin_debug",
-                      backgroundColor: Colors.red,
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => AdminDebugScreen(),
-                          ),
-                        );
-                      },
-                      child: const Icon(Icons.admin_panel_settings),
-                    ),
-                  ),
-                ],
-              );
-            }
-            
-            return homeScreen;
-          },
-        );
+        final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
+        
+        if (kDebugMode) {
+          print('👤 User role: ${provider.currentProfile?.role}');
+        }
+        
+        // Route based on role
+        if (provider.currentProfile?.role == 'admin') {
+          return const AdminDashboardScreen();
+        } else {
+          return const UserHomeScreen();
+        }
       },
     );
   }
   
   Future<void> _initializeUserData(BuildContext context) async {
     final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
-    
-    if (kDebugMode) {
-      print('📊 Initializing user data...');
-    }
-    
-    // Load user profile first
     await provider.loadProfile();
-    
-    if (kDebugMode) {
-      print('👤 Profile loaded: ${provider.currentProfile?.fullName} (${provider.currentProfile?.role})');
-    }
-    
-    // Load services and other data
-    await Future.wait([
-      provider.loadServices(),
-      provider.loadUserTickets(),
-      provider.loadServiceStatuses(),
-    ]);
-    
-    if (kDebugMode) {
-      print('📋 Loaded ${provider.services.length} services');
-      print('🎫 Loaded ${provider.userTickets.length} user tickets');
-      print('📊 Loaded ${provider.serviceStatuses.length} service statuses');
-    }
-    
-    // Subscribe to real-time updates
-    provider.subscribeToServiceStatus();
-    
-    if (kDebugMode) {
-      print('✅ User data initialization complete');
-    }
   }
 }
