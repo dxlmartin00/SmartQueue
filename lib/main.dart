@@ -34,7 +34,7 @@ void main() async {
   runApp(
     ChangeNotifierProvider(
       create: (context) => EnhancedQueueProvider(),
-      child: SmartQueueApp(),
+      child: const SmartQueueApp(),
     ),
   );
 }
@@ -56,10 +56,11 @@ class SmartQueueApp extends StatelessWidget {
         ),
       ),
       home: const AuthWrapper(),
-      // Add named routes for testing
       routes: {
-        '/service-selection-1': (context) => const ServiceSelectionScreen(serviceWindow: 1),
-        '/service-selection-2': (context) => const ServiceSelectionScreen(serviceWindow: 2),
+        '/login': (context) => LoginScreen(),
+        '/user': (context) => const UserHomeScreen(),
+        '/admin': (context) => const AdminDashboardScreen(),
+        '/debug': (context) => const AdminDebugScreen(),
       },
     );
   }
@@ -82,9 +83,12 @@ class AuthWrapper extends StatelessWidget {
           }
         }
         
+        // Check if user is authenticated
         if (snapshot.hasData && snapshot.data!.session != null) {
           return const RoleBasedHome();
         }
+        
+        // Not authenticated - show login screen
         return LoginScreen();
       },
     );
@@ -99,6 +103,7 @@ class RoleBasedHome extends StatelessWidget {
     return FutureBuilder<void>(
       future: _initializeUserData(context),
       builder: (context, snapshot) {
+        // Loading state
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(
@@ -107,26 +112,37 @@ class RoleBasedHome extends StatelessWidget {
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Loading profile...'),
+                  Text('Loading your profile...'),
                 ],
               ),
             ),
           );
         }
-        
+
+        // Error state
         if (snapshot.hasError) {
+          if (kDebugMode) {
+            print('❌ Error loading profile: ${snapshot.error}');
+          }
+          
           return Scaffold(
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error, size: 48, color: Colors.red),
+                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
                   const SizedBox(height: 16),
-                  Text('Error: ${snapshot.error}'),
+                  const Text('Error loading profile'),
+                  const SizedBox(height: 8),
+                  Text(
+                    snapshot.error.toString(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () {
-                      Supabase.instance.client.auth.signOut();
+                    onPressed: () async {
+                      await Supabase.instance.client.auth.signOut();
                     },
                     child: const Text('Sign Out'),
                   ),
@@ -135,25 +151,100 @@ class RoleBasedHome extends StatelessWidget {
             ),
           );
         }
-        
-        final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
-        
-        if (kDebugMode) {
-          print('👤 User role: ${provider.currentProfile?.role}');
-        }
-        
-        // Route based on role
-        if (provider.currentProfile?.role == 'admin') {
-          return const AdminDashboardScreen();
-        } else {
-          return const UserHomeScreen();
-        }
+
+        // Success - route based on role
+        return Consumer<EnhancedQueueProvider>(
+          builder: (context, provider, child) {
+            final role = provider.currentProfile?.role ?? 'user';
+            
+            if (kDebugMode) {
+              print('📍 Routing user to: $role screen');
+              print('👤 Profile: ${provider.currentProfile?.fullName}');
+              print('🎭 Role: $role');
+              if (role == 'admin') {
+                print('🪟 Assigned Window: ${provider.currentProfile?.assignedWindow}');
+              }
+            }
+
+            // Route based on role
+            if (role == 'admin') {
+              return const AdminDashboardScreen();
+            } else {
+              return const UserHomeScreen();
+            }
+          },
+        );
       },
     );
   }
-  
+
   Future<void> _initializeUserData(BuildContext context) async {
     final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
-    await provider.loadProfile();
+    
+    try {
+      if (kDebugMode) {
+        print('🔄 Initializing user data...');
+      }
+
+      // Load user profile
+      await provider.loadProfile();
+      
+      if (provider.currentProfile == null) {
+        if (kDebugMode) {
+          print('⚠️ No profile found, creating default profile...');
+        }
+        
+        // Create a default user profile if none exists
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user != null) {
+          await _createDefaultProfile(user.id, user.email ?? 'User');
+          await provider.loadProfile();
+        }
+      }
+
+      if (kDebugMode) {
+        print('✅ User data initialized');
+        print('Profile: ${provider.currentProfile?.fullName}');
+        print('Role: ${provider.currentProfile?.role}');
+      }
+
+      // Load additional data based on role
+      if (provider.currentProfile?.role == 'admin') {
+        final window = provider.currentProfile?.assignedWindow;
+        if (window != null) {
+          await provider.loadAdminTickets(window);
+          await provider.loadServiceStatuses();
+        }
+      } else {
+        await provider.loadServices();
+        await provider.loadUserTickets();
+        await provider.loadServiceStatuses();
+        provider.subscribeToServiceStatus();
+      }
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error initializing user data: $e');
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _createDefaultProfile(String userId, String email) async {
+    try {
+      await Supabase.instance.client.from('profiles').insert({
+        'id': userId,
+        'full_name': email.split('@')[0], // Use email username as name
+        'role': 'user', // Default to user role
+      });
+      
+      if (kDebugMode) {
+        print('✅ Created default user profile');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Could not create default profile: $e');
+      }
+    }
   }
 }

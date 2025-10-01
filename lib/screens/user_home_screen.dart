@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../state/queue_provider.dart';
 import '../models/service.dart';
 import '../models/queue.dart';
-import 'service_selection_screen.dart';
 
 class UserHomeScreen extends StatefulWidget {
   const UserHomeScreen({super.key});
@@ -28,9 +27,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   Widget build(BuildContext context) {
     return Consumer<EnhancedQueueProvider>(
       builder: (context, provider, child) {
-        final window1Services = provider.services.where((s) => s.window == 1).toList();
-        final window2Services = provider.services.where((s) => s.window == 2).toList();
-        
         return Scaffold(
           appBar: AppBar(
             title: const Text('SmartQueue'),
@@ -63,22 +59,32 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                   const SizedBox(height: 24),
                 ],
                 
-                // Window 1 Services
+                // Window Status Cards
                 const Text(
-                  'Window 1 Services',
+                  'Current Queue Status',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                ServiceStatusCard(serviceWindow: 1, services: window1Services),
-                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: WindowStatusCard(serviceWindow: 1),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: WindowStatusCard(serviceWindow: 2),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 
-                // Window 2 Services
+                // All Services Section
                 const Text(
-                  'Window 2 Services',
+                  'Select a Service',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                ServiceStatusCard(serviceWindow: 2, services: window2Services),
+                AllServicesCard(services: provider.services),
               ],
             ),
           ),
@@ -88,11 +94,11 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   }
 }
 
-class ServiceStatusCard extends StatelessWidget {
+// Window Status Card - Shows current queue status
+class WindowStatusCard extends StatelessWidget {
   final int serviceWindow;
-  final List<Service> services;
 
-  const ServiceStatusCard({super.key, required this.serviceWindow, required this.services});
+  const WindowStatusCard({super.key, required this.serviceWindow});
 
   @override
   Widget build(BuildContext context) {
@@ -103,75 +109,63 @@ class ServiceStatusCard extends StatelessWidget {
           orElse: () => ServiceStatus(serviceWindow: serviceWindow, updatedAt: DateTime.now()),
         );
         
+        // Count waiting tickets for this window
+        final windowServices = provider.services
+            .where((s) => s.window == serviceWindow)
+            .map((s) => s.id)
+            .toSet();
+        
+        final waitingCount = provider.userTickets
+            .where((t) => windowServices.contains(t.serviceId) && t.status == 'waiting')
+            .length;
+        
         return Card(
+          color: serviceWindow == 1 ? Colors.blue.shade50 : Colors.green.shade50,
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    Icon(
+                      Icons.window,
+                      color: serviceWindow == 1 ? Colors.blue : Colors.green,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 4),
                     Text(
                       'Window $serviceWindow',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'Now Serving: ${status.currentNumber ?? 'None'}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.green,
+                      style: TextStyle(
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
+                        color: serviceWindow == 1 ? Colors.blue.shade900 : Colors.green.shade900,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                
-                // Quick service buttons (original inline functionality)
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: services.map((service) => ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        await provider.generateTicket(service.id);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ticket generated for ${service.name}')),
-                          );
-                        }
-                      } catch (error) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $error')),
-                          );
-                        }
-                      }
-                    },
-                    child: Text(service.name),
-                  )).toList(),
+                const SizedBox(height: 8),
+                Text(
+                  'Now Serving:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
-                
-                const SizedBox(height: 12),
-                
-                // Add navigation button to ServiceSelectionScreen for testing
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ServiceSelectionScreen(serviceWindow: serviceWindow),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.arrow_forward),
-                    label: Text('Go to Window $serviceWindow Selection Screen'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.blue,
-                    ),
+                Text(
+                  status.currentNumber ?? 'None',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: serviceWindow == 1 ? Colors.blue.shade700 : Colors.green.shade700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'In Queue: $waitingCount',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
                   ),
                 ),
               ],
@@ -183,72 +177,167 @@ class ServiceStatusCard extends StatelessWidget {
   }
 }
 
+// All Services Card - Shows all services without window grouping
+class AllServicesCard extends StatelessWidget {
+  final List<Service> services;
+
+  const AllServicesCard({super.key, required this.services});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<EnhancedQueueProvider>(
+      builder: (context, provider, child) {
+        if (services.isEmpty) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: Text('No services available'),
+              ),
+            ),
+          );
+        }
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: services.map((service) {
+                final isLoading = provider.isLoading;
+                
+                // Determine color based on which window the service belongs to
+                final color = service.window == 1 ? Colors.blue : Colors.green;
+                
+                return ActionChip(
+                  label: Text(
+                    service.name,
+                    style: TextStyle(
+                      color: color.withOpacity(0.9),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  backgroundColor: color.withOpacity(0.1),
+                  side: BorderSide(color: color.withOpacity(0.3)),
+                  onPressed: isLoading
+                      ? null
+                      : () => _handleServiceSelection(context, provider, service),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _handleServiceSelection(
+    BuildContext context,
+    EnhancedQueueProvider provider,
+    Service service,
+  ) async {
+    try {
+      final ticketNumber = await provider.generateTicket(service.id);
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ticket generated: $ticketNumber\nAssigned to Window ${service.window}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        
+        // Refresh tickets
+        await provider.loadUserTickets();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+}
+
+// Ticket Card - Shows user's current tickets
 class TicketCard extends StatelessWidget {
   final QueueTicket ticket;
 
   const TicketCard({super.key, required this.ticket});
 
+  String _getStatusText(String status) {
+    switch (status) {
+      case 'waiting':
+        return 'Waiting in Queue';
+      case 'serving':
+        return 'Being Served';
+      case 'done':
+        return 'Completed';
+      default:
+        return status;
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'waiting':
+        return Colors.orange;
+      case 'serving':
+        return Colors.green;
+      case 'done':
+        return Colors.grey;
+      default:
+        return Colors.blue;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    Color statusColor;
-    String statusText;
-    
-    switch (ticket.status) {
-      case 'waiting':
-        statusColor = Colors.orange;
-        statusText = 'Waiting';
-        break;
-      case 'serving':
-        statusColor = Colors.green;
-        statusText = 'Being Served';
-        break;
-      case 'done':
-        statusColor = Colors.blue;
-        statusText = 'Completed';
-        break;
-      case 'skipped':
-        statusColor = Colors.red;
-        statusText = 'Skipped';
-        break;
-      default:
-        statusColor = Colors.grey;
-        statusText = 'Unknown';
-    }
-    
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: Container(
-          width: 60,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.blue,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Center(
-            child: Text(
-              ticket.ticketNumber,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+        leading: CircleAvatar(
+          backgroundColor: _getStatusColor(ticket.status).withOpacity(0.2),
+          child: Text(
+            ticket.ticketNumber,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: _getStatusColor(ticket.status),
             ),
           ),
         ),
-        title: Text('Service: ${ticket.serviceId}'),
-        subtitle: Text('Created: ${ticket.createdAt.toString().substring(11, 16)}'),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: statusColor,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            statusText,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-          ),
+        title: Text(
+          ticket.ticketNumber,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_getStatusText(ticket.status)),
+            Text(
+              'Created: ${_formatTime(ticket.createdAt)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
+              ),
+            ),
+          ],
+        ),
+        trailing: ticket.status == 'serving'
+            ? const Icon(Icons.notifications_active, color: Colors.green)
+            : null,
       ),
     );
+  }
+
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 }
