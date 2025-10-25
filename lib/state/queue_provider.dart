@@ -176,94 +176,210 @@ class EnhancedQueueProvider extends ChangeNotifier {
   }
   
   Future<void> loadServices() async {
-    await _executeWithErrorHandling(() async {
-      // Changed from .order('window') to .order('service_window')
-      final response = await _supabase.from('services').select().order('service_window');
-      _services = response.map<Service>((json) => Service.fromJson(json)).toList();
-      await _saveOfflineData();
-    });
-  }
-  
-  Future<void> loadServiceStatuses() async {
-    await _executeWithErrorHandling(() async {
-      final response = await _supabase.from('service_status').select();
-      _serviceStatuses = response.map<ServiceStatus>((json) => ServiceStatus.fromJson(json)).toList();
-    });
-  }
-  
-  void subscribeToServiceStatus() {
-    _statusSubscription?.cancel();
+    debugPrint('🔄 Loading services...');
     
-    if (_isOnline) {
-      _statusSubscription = _supabase
-          .from('service_status')
-          .stream(primaryKey: ['id'])
-          .listen((data) {
-        _serviceStatuses = data.map<ServiceStatus>((json) => ServiceStatus.fromJson(json)).toList();
-        notifyListeners();
-      }, onError: (error) {
-        debugPrint('Real-time subscription error: $error');
-        _setOnlineStatus(false);
+    await _executeWithErrorHandling(() async {
+      final response = await _supabase
+          .from('services')
+          .select()
+          .order('service_window');
+      
+      debugPrint('📦 Received ${response.length} services from database');
+      
+      _services = response.map<Service>((json) {
+        return Service.fromJson(json);
+      }).toList();
+      
+      debugPrint('✅ Parsed ${_services.length} services');
+      for (var service in _services) {
+        debugPrint('  - ${service.name} (Window ${service.window})');
+      }
+      
+      await _saveOfflineData();
+      notifyListeners(); // CRITICAL: Must notify listeners
+    });
+  }
+
+
+    
+    Future<void> loadServiceStatuses() async {
+      await _executeWithErrorHandling(() async {
+        final response = await _supabase.from('service_status').select();
+        _serviceStatuses = response.map<ServiceStatus>((json) => ServiceStatus.fromJson(json)).toList();
       });
     }
-  }
+    
+    void subscribeToServiceStatus() {
+      _statusSubscription?.cancel();
+      
+      if (_isOnline) {
+        _statusSubscription = _supabase
+            .from('service_status')
+            .stream(primaryKey: ['id'])
+            .listen((data) {
+          _serviceStatuses = data.map<ServiceStatus>((json) => ServiceStatus.fromJson(json)).toList();
+          notifyListeners();
+        }, onError: (error) {
+          debugPrint('Real-time subscription error: $error');
+          _setOnlineStatus(false);
+        });
+      }
+    }
   
   Future<String> generateTicket(String serviceId) async {
     final service = _services.firstWhere((s) => s.id == serviceId);
     final prefix = service.window == 1 ? 'A' : 'B';
-    
+    final userId = _supabase.auth.currentUser!.id;
+    final today = DateTime.now().toIso8601String().split('T')[0];
+
     if (_isOnline) {
       return await _executeWithErrorHandling(() async {
         return await _executeGenerateTicket({'service_id': serviceId});
       }) ?? '';
     } else {
+      // Offline mode checks
+
+      // First check: User can only have ONE active ticket across ALL services today
+      final activeTicket = _userTickets.firstWhere(
+        (t) => t.queueDate.toIso8601String().split('T')[0] == today &&
+               (t.status == 'waiting' || t.status == 'serving'),
+        orElse: () => QueueTicket(
+          id: '',
+          serviceId: '',
+          userId: '',
+          ticketNumber: '',
+          status: '',
+          queueDate: DateTime.now(),
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      if (activeTicket.id.isNotEmpty) {
+        final service = _services.firstWhere((s) => s.id == activeTicket.serviceId);
+        throw Exception('You already have an active ticket (${activeTicket.ticketNumber}) for ${service.name}. Please wait for your turn or complete your current ticket before getting a new one.');
+      }
+
+      // Second check: User cannot get another ticket for the SAME service today (even if previous was completed)
+      final existingTicketForService = _userTickets.firstWhere(
+        (t) => t.serviceId == serviceId &&
+               t.queueDate.toIso8601String().split('T')[0] == today,
+        orElse: () => QueueTicket(
+          id: '',
+          serviceId: '',
+          userId: '',
+          ticketNumber: '',
+          status: '',
+          queueDate: DateTime.now(),
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      if (existingTicketForService.id.isNotEmpty) {
+        final service = _services.firstWhere((s) => s.id == serviceId);
+        throw Exception('You already received a ticket for ${service.name} today. Please try a different service or come back tomorrow.');
+      }
+
       // Offline ticket generation
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      final todayTickets = _userTickets.where((t) => 
+      // Count all tickets for this window today (across all services in that window)
+      final window = service.window;
+      final windowServices = _services.where((s) => s.window == window).map((s) => s.id).toList();
+
+      final windowTicketsCount = _userTickets.where((t) =>
           t.queueDate.toIso8601String().split('T')[0] == today &&
-          t.ticketNumber.startsWith(prefix)).length;
-      
-      final ticketNumber = '$prefix-${(todayTickets + 1).toString().padLeft(3, '0')}';
-      
+          windowServices.contains(t.serviceId)).length;
+
+      final nextNumber = windowTicketsCount + 1;
+      final ticketNumber = '$prefix-${nextNumber.toString().padLeft(3, '0')}';
+
       // Create offline ticket
       final offlineTicket = QueueTicket(
         id: 'offline_${DateTime.now().millisecondsSinceEpoch}',
         serviceId: serviceId,
-        userId: _supabase.auth.currentUser!.id,
+        userId: userId,
         ticketNumber: ticketNumber,
         status: 'waiting',
         queueDate: DateTime.now(),
         createdAt: DateTime.now(),
       );
-      
+
       _userTickets.add(offlineTicket);
       _addOfflineAction('generate_ticket', {'service_id': serviceId});
       await _saveOfflineData();
       notifyListeners();
-      
+
       return ticketNumber;
     }
   }
   
   Future<String> _executeGenerateTicket(Map<String, dynamic> data) async {
     final serviceId = data['service_id'];
-    final service = _services.firstWhere((s) => s.id == serviceId);
-    final prefix = service.window == 1 ? 'A' : 'B';
-    
-    final countResponse = await _supabase
+    final userId = _supabase.auth.currentUser!.id;
+    final today = DateTime.now().toIso8601String().split('T')[0];
+
+    debugPrint('🎫 Generating ticket for service $serviceId, user $userId, date $today');
+
+    // First check: User can only have ONE active ticket across ALL services today
+    final activeTickets = await _supabase
         .from('queues')
-        .select()
+        .select('*, services(name)')
+        .eq('user_id', userId)
+        .eq('queue_date', today)
+        .inFilter('status', ['waiting', 'serving']);
+
+    debugPrint('📋 Found ${activeTickets.length} active tickets for this user today');
+
+    if (activeTickets.isNotEmpty) {
+      final activeTicket = activeTickets.first;
+      final ticketNumber = activeTicket['ticket_number'];
+      final serviceName = activeTicket['services']?['name'] ?? 'Unknown Service';
+      debugPrint('⚠️ User already has active ticket $ticketNumber for $serviceName');
+      throw Exception('You already have an active ticket ($ticketNumber) for $serviceName. Please wait for your turn or complete your current ticket before getting a new one.');
+    }
+
+    // Second check: User cannot get another ticket for the SAME service today (even if previous was completed)
+    // This matches the database constraint unique_ticket_per_day
+    final existingTicketForService = await _supabase
+        .from('queues')
+        .select('*, services(name)')
+        .eq('user_id', userId)
         .eq('service_id', serviceId)
-        .eq('queue_date', DateTime.now().toIso8601String().split('T')[0]);
-    
-    final ticketNumber = '$prefix-${(countResponse.length + 1).toString().padLeft(3, '0')}';
-    
+        .eq('queue_date', today);
+
+    debugPrint('📋 Found ${existingTicketForService.length} tickets for this specific service today');
+
+    if (existingTicketForService.isNotEmpty) {
+      final existingTicket = existingTicketForService.first;
+      final ticketNumber = existingTicket['ticket_number'];
+      final serviceName = existingTicket['services']?['name'] ?? 'Unknown Service';
+      final status = existingTicket['status'];
+      debugPrint('⚠️ User already got ticket $ticketNumber for $serviceName today (status: $status)');
+      throw Exception('You already received a ticket for $serviceName today. Please try a different service or come back tomorrow.');
+    }
+
+    final service = _services.firstWhere((s) => s.id == serviceId);
+    final window = service.window;
+
+    debugPrint('🔢 Generating sequential ticket number for window $window using database function');
+
+    // Use PostgreSQL function to generate sequential ticket number atomically
+    // This prevents race conditions when multiple users request tickets simultaneously
+    final ticketNumberResult = await _supabase
+        .rpc('generate_ticket_number', params: {
+          'p_queue_date': today,
+          'p_window': window,
+        });
+
+    final ticketNumber = ticketNumberResult as String;
+
+    debugPrint('✨ Generated ticket number: $ticketNumber for window $window');
+
     await _supabase.from('queues').insert({
       'service_id': serviceId,
-      'user_id': _supabase.auth.currentUser!.id,
+      'user_id': userId,
       'ticket_number': ticketNumber,
     });
-    
+
+    debugPrint('✅ Ticket created successfully');
     await loadUserTickets();
     return ticketNumber;
   }
@@ -287,15 +403,36 @@ class EnhancedQueueProvider extends ChangeNotifier {
   
   Future<void> loadAdminTickets(int window) async {
     await _executeWithErrorHandling(() async {
+      debugPrint('🔍 Loading admin tickets for window $window');
+
+      // First, get all service IDs for this window
+      final servicesForWindow = _services.where((s) => s.window == window).toList();
+
+      if (servicesForWindow.isEmpty) {
+        debugPrint('⚠️ No services found for window $window, loading services first');
+        await loadServices();
+        servicesForWindow.addAll(_services.where((s) => s.window == window));
+      }
+
+      final serviceIds = servicesForWindow.map((s) => s.id).toList();
+      debugPrint('📋 Service IDs for window $window: $serviceIds');
+
+      if (serviceIds.isEmpty) {
+        debugPrint('❌ No services available for window $window');
+        _adminTickets = [];
+        return;
+      }
+
+      // Now fetch tickets for these service IDs
       final response = await _supabase
           .from('queues')
-          .select('*, services(*)')
-          // Changed from .eq('services.window', window) to .eq('services.service_window', window)
-          .eq('services.service_window', window)
+          .select('*')
+          .inFilter('service_id', serviceIds)
           .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
           .order('created_at');
-      
+
       _adminTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
+      debugPrint('✅ Loaded ${_adminTickets.length} tickets for window $window');
     });
   }
   
@@ -316,13 +453,23 @@ class EnhancedQueueProvider extends ChangeNotifier {
   }
   
   Future<void> _executeUpdateServiceStatus(Map<String, dynamic> data) async {
-    await _supabase
-        .from('service_status')
-        .update({
-          'current_number': data['current_number'],
-          'updated_at': DateTime.now().toIso8601String()
-        })
-        .eq('service_window', data['service_window']);  // Changed from 'window' to 'service_window'
+    debugPrint('📝 Updating service status for window ${data['service_window']} to ${data['current_number']}');
+
+    try {
+      // Use upsert to ensure record exists
+      await _supabase
+          .from('service_status')
+          .upsert({
+            'service_window': data['service_window'],
+            'current_number': data['current_number'],
+            'updated_at': DateTime.now().toIso8601String()
+          }, onConflict: 'service_window');
+
+      debugPrint('✅ Service status updated successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to update service status: $e');
+      rethrow;
+    }
   }
   
   Future<void> updateTicketStatus(String ticketId, String status) async {
@@ -364,15 +511,23 @@ class EnhancedQueueProvider extends ChangeNotifier {
   Future<void> _executeUpdateTicketStatus(Map<String, dynamic> data) async {
     final ticketId = data['ticket_id'];
     final status = data['status'];
-    
+
+    debugPrint('📝 Updating ticket $ticketId to status: $status');
+
     final updateData = {'status': status};
     if (status == 'serving') {
       updateData['time_called'] = DateTime.now().toIso8601String();
     } else if (status == 'done') {
       updateData['finished_at'] = DateTime.now().toIso8601String();
     }
-    
-    await _supabase.from('queues').update(updateData).eq('id', ticketId);
+
+    try {
+      await _supabase.from('queues').update(updateData).eq('id', ticketId);
+      debugPrint('✅ Ticket status updated successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to update ticket status: $e');
+      rethrow;
+    }
   }
   
   Future<Map<String, dynamic>> getDailyAnalytics() async {
@@ -399,55 +554,80 @@ class EnhancedQueueProvider extends ChangeNotifier {
     try {
       _setLoading(true);
       _clearError();
-      
+
       final result = await operation();
-      
+
       if (!_isOnline) {
         _setOnlineStatus(true);
       }
-      
+
       return result;
     } catch (e) {
-      debugPrint('Operation failed: $e');
-      
-      if (e.toString().contains('network') || 
+      debugPrint('❌ Operation failed: $e');
+
+      String errorMessage;
+
+      // Parse PostgreSQL errors for user-friendly messages
+      if (e.toString().contains('duplicate key value violates unique constraint')) {
+        if (e.toString().contains('unique_ticket_per_day')) {
+          errorMessage = 'You already have a ticket for this service today. Please check your active tickets.';
+        } else {
+          errorMessage = 'This record already exists.';
+        }
+      } else if (e.toString().contains('network') ||
           e.toString().contains('connection') ||
           e.toString().contains('timeout')) {
         _setOnlineStatus(false);
+        errorMessage = 'Network connection issue. Please check your internet connection.';
+      } else if (e.toString().contains('Exception:')) {
+        // Extract custom exception messages
+        errorMessage = e.toString().replaceAll('Exception:', '').trim();
+      } else {
+        errorMessage = e.toString();
       }
-      
-      _setError(e.toString());
+
+      _setError(errorMessage);
       return null;
     } finally {
       _setLoading(false);
     }
   }
-  
+
   void _setLoading(bool loading) {
     if (_isLoading != loading) {
       _isLoading = loading;
       notifyListeners();
     }
   }
-  
+
   void _setError(String? error) {
     if (_error != error) {
       _error = error;
       notifyListeners();
     }
   }
-  
+
   void _clearError() {
     if (_error != null) {
       _error = null;
       notifyListeners();
     }
   }
-  
+
   void clearError() {
     _clearError();
   }
-  
+
+  // Helper method to get service name by ID
+  String getServiceName(String serviceId) {
+    try {
+      final service = _services.firstWhere((s) => s.id == serviceId);
+      return service.name;
+    } catch (e) {
+      return 'Unknown Service';
+    }
+  }
+
   @override
   void dispose() {
     _statusSubscription?.cancel();
@@ -456,4 +636,5 @@ class EnhancedQueueProvider extends ChangeNotifier {
     _offlineQueueTimer?.cancel();
     super.dispose();
   }
+
 }

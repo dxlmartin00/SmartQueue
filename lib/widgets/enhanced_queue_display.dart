@@ -142,7 +142,15 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
             ),
             IconButton(
               icon: Icon(Icons.close, color: Colors.red.shade600),
-              onPressed: provider.clearError,
+              onPressed: () {
+                // Call the internal method _clearError through the provider
+                // Since clearError() should exist in EnhancedQueueProvider
+                try {
+                  provider.clearError();
+                } catch (e) {
+                  debugPrint('Error clearing error: $e');
+                }
+              },
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
             ),
@@ -328,63 +336,30 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
       child: Container(
         decoration: ticket.status == 'serving'
             ? BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                gradient: LinearGradient(
-                  colors: [Colors.green.shade50, Colors.white],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                border: Border.all(color: statusColor, width: 2),
+                borderRadius: BorderRadius.circular(12),
               )
             : null,
         child: ListTile(
-          leading: Container(
-            width: 50,
-            height: 40,
-            decoration: BoxDecoration(
-              color: statusColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Text(
-                ticket.ticketNumber,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
+          leading: CircleAvatar(
+            backgroundColor: statusColor.withOpacity(0.2),
+            child: Icon(statusIcon, color: statusColor),
           ),
           title: Text(
-            'Service: ${_getServiceName(ticket.serviceId, provider)}',
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            _getServiceName(ticket.serviceId, provider),
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Icon(statusIcon, size: 16, color: statusColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    statusText,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              if (ticket.status == 'waiting' && queuePosition > 0) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Position: $queuePosition | Est. wait: ${estimatedWait}m',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                  ),
+              Text('Ticket: ${ticket.ticketNumber}'),
+              Text(
+                '$statusText${ticket.status == 'waiting' ? ' • Position: $queuePosition • Est. wait: ${estimatedWait}m' : ''}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
                 ),
-              ],
+              ),
               Text(
                 'Created: ${_formatTime(ticket.createdAt)}',
                 style: TextStyle(
@@ -487,7 +462,9 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
       ),
       backgroundColor: color.withOpacity(0.1),
       side: BorderSide(color: color.withOpacity(0.3)),
-      onPressed: isLoading ? null : () => _generateTicket(service, provider),
+      onPressed: isLoading 
+          ? null 
+          : () => _generateTicket(service, provider),
       avatar: isLoading 
           ? SizedBox(
               width: 16,

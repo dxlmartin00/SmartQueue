@@ -9,7 +9,15 @@ class Service {
     return Service(
       id: json['id'],
       name: json['name'],
-      window: json['service_window'],
+      window: json['service_window'], // This matches your database column
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'service_window': window,
+    };
   }
 }

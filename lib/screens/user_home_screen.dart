@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../state/queue_provider.dart';
 import '../models/service.dart';
 import '../models/queue.dart';
+import 'service_selection_screen.dart';
 
 class UserHomeScreen extends StatefulWidget {
   const UserHomeScreen({super.key});
@@ -16,328 +17,372 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadData();
+    });
+  }
+
+  Future<void> _loadData() async {
     final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
-    provider.loadServices();
-    provider.loadUserTickets();
-    provider.loadServiceStatuses();
+    debugPrint('🚀 UserHomeScreen: Starting data load...');
+
+    // Clear any previous errors when refreshing
+    provider.clearError();
+
+    await provider.loadServices();
+    await provider.loadUserTickets();
+    await provider.loadServiceStatuses();
     provider.subscribeToServiceStatus();
+
+    debugPrint('✅ UserHomeScreen: Data load complete');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<EnhancedQueueProvider>(
-      builder: (context, provider, child) {
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('SmartQueue'),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.logout),
-                onPressed: () => Supabase.instance.client.auth.signOut(),
-              ),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('SmartQueue'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
           ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Welcome, ${provider.currentProfile?.fullName ?? 'User'}!',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 24),
-                
-                // Current Tickets
-                if (provider.userTickets.isNotEmpty) ...[
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => Supabase.instance.client.auth.signOut(),
+          ),
+        ],
+      ),
+      body: Consumer<EnhancedQueueProvider>(
+        builder: (context, provider, child) {
+          if (provider.isLoading && provider.services.isEmpty) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _loadData,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Welcome, ${provider.currentProfile?.fullName ?? 'User'}!',
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Error display
+                  if (provider.error != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error, color: Colors.red.shade700),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              provider.error!,
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: provider.clearError,
+                          ),
+                        ],
+                      ),
+                    ),
+                  
+                  // Current Active Ticket
+                  _buildActiveTicketSection(provider),
+                  
+                  // Window Status Cards
                   const Text(
-                    'Your Tickets Today',
+                    'Current Queue Status',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  ...provider.userTickets.map((ticket) => TicketCard(ticket: ticket)),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildWindowStatusCard(provider, 1),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildWindowStatusCard(provider, 2),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 24),
-                ],
-                
-                // Window Status Cards
-                const Text(
-                  'Current Queue Status',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: WindowStatusCard(serviceWindow: 1),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: WindowStatusCard(serviceWindow: 2),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                
-                // All Services Section
-                const Text(
-                  'Select a Service',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                AllServicesCard(services: provider.services),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// Window Status Card - Shows current queue status
-class WindowStatusCard extends StatelessWidget {
-  final int serviceWindow;
-
-  const WindowStatusCard({super.key, required this.serviceWindow});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<EnhancedQueueProvider>(
-      builder: (context, provider, child) {
-        final status = provider.serviceStatuses.firstWhere(
-          (s) => s.serviceWindow == serviceWindow,
-          orElse: () => ServiceStatus(serviceWindow: serviceWindow, updatedAt: DateTime.now()),
-        );
-        
-        // Count waiting tickets for this window
-        final windowServices = provider.services
-            .where((s) => s.window == serviceWindow)
-            .map((s) => s.id)
-            .toSet();
-        
-        final waitingCount = provider.userTickets
-            .where((t) => windowServices.contains(t.serviceId) && t.status == 'waiting')
-            .length;
-        
-        return Card(
-          color: serviceWindow == 1 ? Colors.blue.shade50 : Colors.green.shade50,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.window,
-                      color: serviceWindow == 1 ? Colors.blue : Colors.green,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Window $serviceWindow',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: serviceWindow == 1 ? Colors.blue.shade900 : Colors.green.shade900,
+                  
+                  // Service Selection Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ServiceSelectionScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.medical_services),
+                      label: const Text('Select a Service'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        textStyle: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Now Serving:',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade700,
                   ),
-                ),
-                Text(
-                  status.currentNumber ?? 'None',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: serviceWindow == 1 ? Colors.blue.shade700 : Colors.green.shade700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'In Queue: $waitingCount',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// All Services Card - Shows all services without window grouping
-class AllServicesCard extends StatelessWidget {
-  final List<Service> services;
-
-  const AllServicesCard({super.key, required this.services});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<EnhancedQueueProvider>(
-      builder: (context, provider, child) {
-        if (services.isEmpty) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(
-                child: Text('No services available'),
+                ],
               ),
             ),
           );
-        }
-
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: services.map((service) {
-                final isLoading = provider.isLoading;
-                
-                // Determine color based on which window the service belongs to
-                final color = service.window == 1 ? Colors.blue : Colors.green;
-                
-                return ActionChip(
-                  label: Text(
-                    service.name,
-                    style: TextStyle(
-                      color: color.withOpacity(0.9),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  backgroundColor: color.withOpacity(0.1),
-                  side: BorderSide(color: color.withOpacity(0.3)),
-                  onPressed: isLoading
-                      ? null
-                      : () => _handleServiceSelection(context, provider, service),
-                );
-              }).toList(),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _handleServiceSelection(
-    BuildContext context,
-    EnhancedQueueProvider provider,
-    Service service,
-  ) async {
-    try {
-      final ticketNumber = await provider.generateTicket(service.id);
-      
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ticket generated: $ticketNumber\nAssigned to Window ${service.window}'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        
-        // Refresh tickets
-        await provider.loadUserTickets();
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-}
-
-// Ticket Card - Shows user's current tickets
-class TicketCard extends StatelessWidget {
-  final QueueTicket ticket;
-
-  const TicketCard({super.key, required this.ticket});
-
-  String _getStatusText(String status) {
-    switch (status) {
-      case 'waiting':
-        return 'Waiting in Queue';
-      case 'serving':
-        return 'Being Served';
-      case 'done':
-        return 'Completed';
-      default:
-        return status;
-    }
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'waiting':
-        return Colors.orange;
-      case 'serving':
-        return Colors.green;
-      case 'done':
-        return Colors.grey;
-      default:
-        return Colors.blue;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: _getStatusColor(ticket.status).withOpacity(0.2),
-          child: Text(
-            ticket.ticketNumber,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              color: _getStatusColor(ticket.status),
-            ),
-          ),
-        ),
-        title: Text(
-          ticket.ticketNumber,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_getStatusText(ticket.status)),
-            Text(
-              'Created: ${_formatTime(ticket.createdAt)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade500,
-              ),
-            ),
-          ],
-        ),
-        trailing: ticket.status == 'serving'
-            ? const Icon(Icons.notifications_active, color: Colors.green)
-            : null,
+        },
       ),
     );
   }
 
-  String _formatTime(DateTime time) {
-    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  Widget _buildActiveTicketSection(EnhancedQueueProvider provider) {
+    // Find active ticket (waiting or serving)
+    final activeTicket = provider.userTickets.firstWhere(
+      (t) => t.status == 'waiting' || t.status == 'serving',
+      orElse: () => QueueTicket(
+        id: '',
+        serviceId: '',
+        userId: '',
+        ticketNumber: '',
+        status: '',
+        queueDate: DateTime.now(),
+        createdAt: DateTime.now(),
+      ),
+    );
+
+    if (activeTicket.id.isEmpty) {
+      // No active ticket - show message
+      return Column(
+        children: [
+          Card(
+            color: Colors.blue.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue.shade700, size: 32),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      'You don\'t have an active ticket. Select a service below to get started!',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.blue.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+      );
+    }
+
+    // Has active ticket - show it prominently
+    final service = provider.services.firstWhere(
+      (s) => s.id == activeTicket.serviceId,
+      orElse: () => Service(id: activeTicket.serviceId, name: 'Unknown', window: 1),
+    );
+
+    final isServing = activeTicket.status == 'serving';
+    final color = isServing ? Colors.green : Colors.orange;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Your Current Ticket',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 4,
+          color: color.shade50,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: color.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Text(
+                          activeTicket.ticketNumber,
+                          style: TextStyle(
+                            color: color.shade900,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            service.name,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: color.shade900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Window ${service.window}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: color.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isServing ? Icons.notifications_active : Icons.schedule,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isServing ? 'NOW SERVING' : 'WAITING',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (isServing) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.shade300, width: 2),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green.shade700, size: 24),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Please proceed to Window ${service.window} now!',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
   }
+
+  Widget _buildWindowStatusCard(EnhancedQueueProvider provider, int window) {
+    final status = provider.serviceStatuses.firstWhere(
+      (s) => s.serviceWindow == window,
+      orElse: () => ServiceStatus(serviceWindow: window, updatedAt: DateTime.now()),
+    );
+    
+    return Card(
+      color: window == 1 ? Colors.blue.shade50 : Colors.green.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.window,
+                  color: window == 1 ? Colors.blue : Colors.green,
+                  size: 20,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Window $window',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: window == 1 ? Colors.blue.shade900 : Colors.green.shade900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Now Serving:',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+            ),
+            Text(
+              status.currentNumber ?? 'None',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: window == 1 ? Colors.blue.shade700 : Colors.green.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 }
