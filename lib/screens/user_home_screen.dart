@@ -49,7 +49,23 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => Supabase.instance.client.auth.signOut(),
+            onPressed: () async {
+              try {
+                debugPrint('🚪 User signing out...');
+                await Supabase.instance.client.auth.signOut();
+                debugPrint('✅ Sign out successful');
+
+                // Force navigation to login screen
+                if (context.mounted) {
+                  Navigator.of(context).pushNamedAndRemoveUntil(
+                    '/login',
+                    (route) => false,
+                  );
+                }
+              } catch (e) {
+                debugPrint('❌ Sign out error: $e');
+              }
+            },
           ),
         ],
       ),
@@ -158,9 +174,9 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   }
 
   Widget _buildActiveTicketSection(EnhancedQueueProvider provider) {
-    // Find active ticket (waiting or serving)
+    // Find active ticket (waiting or serving, excluding cancelled)
     final activeTicket = provider.userTickets.firstWhere(
-      (t) => t.status == 'waiting' || t.status == 'serving',
+      (t) => (t.status == 'waiting' || t.status == 'serving') && t.status != 'cancelled',
       orElse: () => QueueTicket(
         id: '',
         serviceId: '',
@@ -326,6 +342,23 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                     ),
                   ),
                 ],
+                // Cancel button for waiting tickets
+                if (!isServing) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showCancelDialog(context, activeTicket, provider),
+                      icon: const Icon(Icons.cancel),
+                      label: const Text('Cancel Ticket'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red, width: 2),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -340,7 +373,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       (s) => s.serviceWindow == window,
       orElse: () => ServiceStatus(serviceWindow: window, updatedAt: DateTime.now()),
     );
-    
+
     return Card(
       color: window == 1 ? Colors.blue.shade50 : Colors.green.shade50,
       child: Padding(
@@ -383,6 +416,131 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         ),
       ),
     );
+  }
+
+  void _showCancelDialog(BuildContext context, QueueTicket ticket, EnhancedQueueProvider provider) {
+    final service = provider.services.firstWhere(
+      (s) => s.id == ticket.serviceId,
+      orElse: () => Service(id: ticket.serviceId, name: 'Unknown', window: 1),
+    );
+
+    // Store a reference to the widget's context
+    final widgetContext = context;
+
+    showDialog(
+      context: widgetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Cancel Ticket?'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Are you sure you want to cancel this ticket?'),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ticket: ${ticket.ticketNumber}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(service.name),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Window ${service.window}',
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This action cannot be undone.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Keep Ticket'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _cancelTicket(ticket, provider);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Cancel Ticket'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelTicket(QueueTicket ticket, EnhancedQueueProvider provider) async {
+    try {
+      debugPrint('🔴 User attempting to cancel ticket: ${ticket.id} (${ticket.ticketNumber})');
+      await provider.cancelTicket(ticket.id);
+      debugPrint('✅ Ticket cancelled successfully');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('Ticket ${ticket.ticketNumber} cancelled'),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('❌ Failed to cancel ticket: $error');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Failed to cancel ticket: $error')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
 }

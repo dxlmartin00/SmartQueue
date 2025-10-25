@@ -36,9 +36,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         // Filter tickets based on window
         final allTickets = provider.adminTickets;
         final todayTickets = allTickets.where((t) {
-          final isToday = t.queueDate.day == DateTime.now().day &&
-              t.queueDate.month == DateTime.now().month &&
-              t.queueDate.year == DateTime.now().year;
+          final now = DateTime.now();
+          final isToday = t.queueDate.day == now.day &&
+              t.queueDate.month == now.month &&
+              t.queueDate.year == now.year;
           
           if (widget.specificWindow == null) return isToday;
           
@@ -57,10 +58,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         final totalCount = todayTickets.length;
 
         // Calculate average wait time for completed tickets
-        final completedTickets = todayTickets.where((t) => 
+        final completedTickets = todayTickets.where((t) =>
           t.status == 'done' && t.timeCalled != null && t.finishedAt != null
         ).toList();
-        
+
         final avgWaitMinutes = completedTickets.isEmpty
             ? 0
             : completedTickets.map((t) {

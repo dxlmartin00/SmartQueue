@@ -280,7 +280,7 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
 
   Widget _buildActiveTickets(EnhancedQueueProvider provider) {
     final activeTickets = provider.userTickets
-        .where((t) => t.status != 'done' && t.status != 'skipped')
+        .where((t) => t.status != 'done' && t.status != 'skipped' && t.status != 'cancelled')
         .toList();
 
     if (activeTickets.isEmpty) return const SizedBox.shrink();
@@ -371,10 +371,128 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
           ),
           trailing: ticket.status == 'serving'
               ? const Icon(Icons.notifications_active, color: Colors.green)
-              : null,
+              : ticket.status == 'waiting'
+                  ? IconButton(
+                      icon: const Icon(Icons.cancel, color: Colors.red),
+                      onPressed: () => _showCancelDialog(context, ticket, provider),
+                      tooltip: 'Cancel Ticket',
+                    )
+                  : null,
         ),
       ),
     );
+  }
+
+  void _showCancelDialog(BuildContext context, QueueTicket ticket, EnhancedQueueProvider provider) {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Cancel Ticket?'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Are you sure you want to cancel this ticket?'),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ticket: ${ticket.ticketNumber}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(_getServiceName(ticket.serviceId, provider)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This action cannot be undone.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Keep Ticket'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _cancelTicket(ticket, provider);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Cancel Ticket'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelTicket(QueueTicket ticket, EnhancedQueueProvider provider) async {
+    try {
+      debugPrint('🔴 User attempting to cancel ticket: ${ticket.id} (${ticket.ticketNumber})');
+      await provider.cancelTicket(ticket.id);
+      debugPrint('✅ Ticket cancelled successfully');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('Ticket ${ticket.ticketNumber} cancelled'),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('❌ Failed to cancel ticket: $error');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Failed to cancel ticket: $error')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildServiceSelection(EnhancedQueueProvider provider) {
@@ -483,19 +601,27 @@ class _EnhancedQueueDisplayState extends State<EnhancedQueueDisplay>
   }
 
   int _calculateQueuePosition(QueueTicket ticket, EnhancedQueueProvider provider) {
-    final sameWindowTickets = provider.userTickets
-        .where((t) => 
-            t.status == 'waiting' && 
-            _getServiceWindow(t.serviceId, provider) == _getServiceWindow(ticket.serviceId, provider))
+    // Get all tickets from the admin queue for the same window
+    final serviceWindow = _getServiceWindow(ticket.serviceId, provider);
+    final allWaitingTickets = provider.adminTickets
+        .where((t) =>
+            t.status == 'waiting' &&
+            _getServiceWindow(t.serviceId, provider) == serviceWindow)
         .toList();
-    
-    sameWindowTickets.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    
-    return sameWindowTickets.indexWhere((t) => t.id == ticket.id) + 1;
+
+    // Sort by creation time to get actual queue order
+    allWaitingTickets.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    // Find position (1-indexed)
+    final position = allWaitingTickets.indexWhere((t) => t.id == ticket.id) + 1;
+    return position > 0 ? position : 1;
   }
 
   int _calculateEstimatedWait(int position) {
-    return position * 5; // 5 minutes per person estimate
+    // More realistic estimate: 3-5 minutes average service time
+    // Position accounts for people ahead in queue
+    if (position <= 1) return 0; // Next in line
+    return (position - 1) * 4; // 4 minutes average per person
   }
 
   String _getServiceName(String serviceId, EnhancedQueueProvider provider) {

@@ -16,9 +16,39 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
   @override
   void initState() {
     super.initState();
-    final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
-    provider.loadServiceStatuses(); // Load service statuses first
-    provider.loadAdminTickets(widget.serviceWindow);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
+        _initializeData(provider);
+      }
+    });
+  }
+
+  Future<void> _initializeData(EnhancedQueueProvider provider) async {
+    if (!mounted) return;
+
+    await provider.loadServices(); // Ensure services are loaded first
+    if (!mounted) return;
+
+    await provider.loadServiceStatuses(); // Load service statuses
+    if (!mounted) return;
+
+    await provider.loadAdminTickets(widget.serviceWindow); // Load initial tickets
+    if (!mounted) return;
+
+    provider.subscribeToAdminQueue(widget.serviceWindow); // Subscribe to real-time updates
+  }
+
+  @override
+  void dispose() {
+    // Access provider before calling super.dispose()
+    try {
+      final provider = Provider.of<EnhancedQueueProvider>(context, listen: false);
+      provider.unsubscribeFromAdminQueue();
+    } catch (e) {
+      debugPrint('⚠️ Error unsubscribing from queue: $e');
+    }
+    super.dispose();
   }
 
   @override
@@ -32,7 +62,8 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
         
         final waitingTickets = provider.adminTickets
             .where((t) => t.status == 'waiting')
-            .toList();
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
         final servingTickets = provider.adminTickets
             .where((t) => t.status == 'serving')
@@ -83,7 +114,7 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
                               : Colors.grey.shade400,
                         ),
                       ),
-                      if (servingTickets.isNotEmpty) ...[
+                      if (servingTickets.isNotEmpty && status.currentNumber != null && status.currentNumber!.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -164,7 +195,7 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
 
               const SizedBox(height: 12),
 
-              // Skip Button - Small (rarely used)
+              // Secondary button row
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -325,9 +356,22 @@ class _QueueControlScreenState extends State<QueueControlScreen> {
   }
 
   String _calculateWaitTime(DateTime createdAt) {
-    final diff = DateTime.now().difference(createdAt);
+    final now = DateTime.now();
+    final diff = now.difference(createdAt);
     final minutes = diff.inMinutes;
-    return '${minutes}m';
+
+    if (minutes < 1) {
+      return 'Just now';
+    } else if (minutes < 60) {
+      return '${minutes}m ago';
+    } else {
+      final hours = minutes ~/ 60;
+      final remainingMinutes = minutes % 60;
+      if (remainingMinutes == 0) {
+        return '${hours}h ago';
+      }
+      return '${hours}h ${remainingMinutes}m ago';
+    }
   }
 
   Future<void> _callNext(EnhancedQueueProvider provider, QueueTicket ticket) async {

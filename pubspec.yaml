@@ -19,6 +19,7 @@ dependencies:
   # UI & Animations
   fl_chart: ^0.66.2
   cupertino_icons: ^1.0.2
+  intl: ^0.19.0
   
   # Enhanced Features
   shared_preferences: ^2.2.2  # Offline storage

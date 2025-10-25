@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../models/profile.dart';
 import '../models/service.dart';
 import '../models/queue.dart';
+import '../models/transaction.dart';
 
 class EnhancedQueueProvider extends ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -16,6 +17,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
   List<QueueTicket> _userTickets = [];
   List<QueueTicket> _adminTickets = [];
   List<ServiceStatus> _serviceStatuses = [];
+  List<Transaction> _transactions = [];
   bool _isOnline = true;
   bool _isLoading = false;
   String? _error;
@@ -25,6 +27,8 @@ class EnhancedQueueProvider extends ChangeNotifier {
   StreamSubscription? _queueSubscription;
   Timer? _reconnectTimer;
   Timer? _offlineQueueTimer;
+  Timer? _adminQueuePollingTimer;
+  int? _currentAdminWindow;
   
   // Offline support
   final List<Map<String, dynamic>> _offlineActions = [];
@@ -36,6 +40,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
   List<QueueTicket> get userTickets => _userTickets;
   List<QueueTicket> get adminTickets => _adminTickets;
   List<ServiceStatus> get serviceStatuses => _serviceStatuses;
+  List<Transaction> get transactions => _transactions;
   bool get isOnline => _isOnline;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -152,6 +157,9 @@ class EnhancedQueueProvider extends ChangeNotifier {
           case 'update_service_status':
             await _executeUpdateServiceStatus(action['data']);
             break;
+          case 'cancel_ticket':
+            await _executeCancelTicket(action['data']['ticket_id']);
+            break;
         }
       } catch (e) {
         debugPrint('Failed to sync offline action: $e');
@@ -211,7 +219,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
     
     void subscribeToServiceStatus() {
       _statusSubscription?.cancel();
-      
+
       if (_isOnline) {
         _statusSubscription = _supabase
             .from('service_status')
@@ -224,6 +232,94 @@ class EnhancedQueueProvider extends ChangeNotifier {
           _setOnlineStatus(false);
         });
       }
+    }
+
+    void subscribeToAdminQueue(int window) {
+      _queueSubscription?.cancel();
+      _adminQueuePollingTimer?.cancel();
+      _currentAdminWindow = window;
+
+      if (_isOnline) {
+        debugPrint('🔔 Starting admin queue updates for window $window');
+
+        // Try real-time subscription first
+        _attemptRealtimeSubscription(window);
+
+        // Start polling as a backup (every 5 seconds)
+        _startAdminQueuePolling(window);
+      }
+    }
+
+    void _attemptRealtimeSubscription(int window) {
+      try {
+        final servicesForWindow = _services.where((s) => s.window == window).toList();
+        if (servicesForWindow.isEmpty) {
+          debugPrint('⚠️ No services found for window $window');
+          return;
+        }
+
+        final serviceIds = servicesForWindow.map((s) => s.id).toList();
+        final today = DateTime.now().toIso8601String().split('T')[0];
+
+        debugPrint('📡 Attempting real-time subscription for window $window');
+
+        _queueSubscription = _supabase
+            .from('queues')
+            .stream(primaryKey: ['id'])
+            .listen((data) {
+          try {
+            debugPrint('📡 Real-time update: ${data.length} total tickets');
+
+            // Filter for this window's services and today's date
+            final windowTickets = data.where((json) {
+              final serviceId = json['service_id'];
+              final queueDate = json['queue_date'];
+              return serviceIds.contains(serviceId) && queueDate == today;
+            }).toList();
+
+            _adminTickets = windowTickets.map<QueueTicket>((json) {
+              return QueueTicket.fromJson(json);
+            }).toList();
+
+            debugPrint('✅ Real-time: Updated ${_adminTickets.length} tickets');
+            notifyListeners();
+          } catch (e) {
+            debugPrint('❌ Error processing real-time data: $e');
+          }
+        }, onError: (error) {
+          debugPrint('⚠️ Real-time subscription error: $error');
+          debugPrint('   Falling back to polling only');
+          _queueSubscription?.cancel();
+          _queueSubscription = null;
+        });
+      } catch (e) {
+        debugPrint('❌ Failed to create real-time subscription: $e');
+        debugPrint('   Using polling only');
+      }
+    }
+
+    void _startAdminQueuePolling(int window) {
+      debugPrint('🔄 Starting polling for window $window (every 5 seconds)');
+
+      _adminQueuePollingTimer?.cancel();
+      _adminQueuePollingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+        if (_currentAdminWindow == window && _isOnline) {
+          try {
+            await loadAdminTickets(window);
+          } catch (e) {
+            debugPrint('⚠️ Polling error: $e');
+          }
+        }
+      });
+    }
+
+    void unsubscribeFromAdminQueue() {
+      debugPrint('🔕 Unsubscribing from queue updates');
+      _queueSubscription?.cancel();
+      _queueSubscription = null;
+      _adminQueuePollingTimer?.cancel();
+      _adminQueuePollingTimer = null;
+      _currentAdminWindow = null;
     }
   
   Future<String> generateTicket(String serviceId) async {
@@ -257,26 +353,6 @@ class EnhancedQueueProvider extends ChangeNotifier {
       if (activeTicket.id.isNotEmpty) {
         final service = _services.firstWhere((s) => s.id == activeTicket.serviceId);
         throw Exception('You already have an active ticket (${activeTicket.ticketNumber}) for ${service.name}. Please wait for your turn or complete your current ticket before getting a new one.');
-      }
-
-      // Second check: User cannot get another ticket for the SAME service today (even if previous was completed)
-      final existingTicketForService = _userTickets.firstWhere(
-        (t) => t.serviceId == serviceId &&
-               t.queueDate.toIso8601String().split('T')[0] == today,
-        orElse: () => QueueTicket(
-          id: '',
-          serviceId: '',
-          userId: '',
-          ticketNumber: '',
-          status: '',
-          queueDate: DateTime.now(),
-          createdAt: DateTime.now(),
-        ),
-      );
-
-      if (existingTicketForService.id.isNotEmpty) {
-        final service = _services.firstWhere((s) => s.id == serviceId);
-        throw Exception('You already received a ticket for ${service.name} today. Please try a different service or come back tomorrow.');
       }
 
       // Offline ticket generation
@@ -324,7 +400,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
         .select('*, services(name)')
         .eq('user_id', userId)
         .eq('queue_date', today)
-        .inFilter('status', ['waiting', 'serving']);
+        .filter('status', 'in', '(waiting,serving)');
 
     debugPrint('📋 Found ${activeTickets.length} active tickets for this user today');
 
@@ -334,26 +410,6 @@ class EnhancedQueueProvider extends ChangeNotifier {
       final serviceName = activeTicket['services']?['name'] ?? 'Unknown Service';
       debugPrint('⚠️ User already has active ticket $ticketNumber for $serviceName');
       throw Exception('You already have an active ticket ($ticketNumber) for $serviceName. Please wait for your turn or complete your current ticket before getting a new one.');
-    }
-
-    // Second check: User cannot get another ticket for the SAME service today (even if previous was completed)
-    // This matches the database constraint unique_ticket_per_day
-    final existingTicketForService = await _supabase
-        .from('queues')
-        .select('*, services(name)')
-        .eq('user_id', userId)
-        .eq('service_id', serviceId)
-        .eq('queue_date', today);
-
-    debugPrint('📋 Found ${existingTicketForService.length} tickets for this specific service today');
-
-    if (existingTicketForService.isNotEmpty) {
-      final existingTicket = existingTicketForService.first;
-      final ticketNumber = existingTicket['ticket_number'];
-      final serviceName = existingTicket['services']?['name'] ?? 'Unknown Service';
-      final status = existingTicket['status'];
-      debugPrint('⚠️ User already got ticket $ticketNumber for $serviceName today (status: $status)');
-      throw Exception('You already received a ticket for $serviceName today. Please try a different service or come back tomorrow.');
     }
 
     final service = _services.firstWhere((s) => s.id == serviceId);
@@ -373,14 +429,27 @@ class EnhancedQueueProvider extends ChangeNotifier {
 
     debugPrint('✨ Generated ticket number: $ticketNumber for window $window');
 
+    // Store timestamp in UTC but adjusted for local time display
+    // Supabase stores in UTC, so we add 8 hours to compensate
+    final adjustedTime = DateTime.now().toUtc().add(const Duration(hours: 8));
+
     await _supabase.from('queues').insert({
       'service_id': serviceId,
       'user_id': userId,
       'ticket_number': ticketNumber,
+      'status': 'waiting',
+      'queue_date': today,
+      'created_at': adjustedTime.toIso8601String(),
     });
 
-    debugPrint('✅ Ticket created successfully');
+    debugPrint('✅ Ticket created successfully: $ticketNumber');
+    debugPrint('   Service ID: $serviceId');
+    debugPrint('   User ID: $userId');
+    debugPrint('   Queue Date: $today');
+
     await loadUserTickets();
+    debugPrint('📋 User tickets reloaded. Count: ${_userTickets.length}');
+
     return ticketNumber;
   }
   
@@ -388,13 +457,18 @@ class EnhancedQueueProvider extends ChangeNotifier {
     await _executeWithErrorHandling(() async {
       final user = _supabase.auth.currentUser;
       if (user != null) {
+        final today = DateTime.now().toIso8601String().split('T')[0];
+        debugPrint('🔍 Loading user tickets for user ${user.id}, date: $today');
+
         final response = await _supabase
             .from('queues')
             .select('*, services(*)')
             .eq('user_id', user.id)
-            .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
+            .eq('queue_date', today)
             .order('created_at');
-        
+
+        debugPrint('📦 Found ${response.length} tickets for user');
+
         _userTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
         await _saveOfflineData();
       }
@@ -424,11 +498,13 @@ class EnhancedQueueProvider extends ChangeNotifier {
       }
 
       // Now fetch tickets for these service IDs
+      // Convert service IDs to the format needed for filter: (id1,id2,id3)
+      final serviceIdsString = '(${serviceIds.join(',')})';
       final response = await _supabase
           .from('queues')
           .select('*')
-          .inFilter('service_id', serviceIds)
           .eq('queue_date', DateTime.now().toIso8601String().split('T')[0])
+          .filter('service_id', 'in', serviceIdsString)
           .order('created_at');
 
       _adminTickets = response.map<QueueTicket>((json) => QueueTicket.fromJson(json)).toList();
@@ -455,6 +531,9 @@ class EnhancedQueueProvider extends ChangeNotifier {
   Future<void> _executeUpdateServiceStatus(Map<String, dynamic> data) async {
     debugPrint('📝 Updating service status for window ${data['service_window']} to ${data['current_number']}');
 
+    // Store timestamp in UTC but adjusted for local time display
+    final adjustedTime = DateTime.now().toUtc().add(const Duration(hours: 8));
+
     try {
       // Use upsert to ensure record exists
       await _supabase
@@ -462,7 +541,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
           .upsert({
             'service_window': data['service_window'],
             'current_number': data['current_number'],
-            'updated_at': DateTime.now().toIso8601String()
+            'updated_at': adjustedTime.toIso8601String()
           }, onConflict: 'service_window');
 
       debugPrint('✅ Service status updated successfully');
@@ -514,11 +593,15 @@ class EnhancedQueueProvider extends ChangeNotifier {
 
     debugPrint('📝 Updating ticket $ticketId to status: $status');
 
+    // Store timestamp in UTC but adjusted for local time display
+    // Supabase stores in UTC, so we add 8 hours to compensate
+    final adjustedTime = DateTime.now().toUtc().add(const Duration(hours: 8));
+
     final updateData = {'status': status};
     if (status == 'serving') {
-      updateData['time_called'] = DateTime.now().toIso8601String();
+      updateData['time_called'] = adjustedTime.toIso8601String();
     } else if (status == 'done') {
-      updateData['finished_at'] = DateTime.now().toIso8601String();
+      updateData['finished_at'] = adjustedTime.toIso8601String();
     }
 
     try {
@@ -569,11 +652,7 @@ class EnhancedQueueProvider extends ChangeNotifier {
 
       // Parse PostgreSQL errors for user-friendly messages
       if (e.toString().contains('duplicate key value violates unique constraint')) {
-        if (e.toString().contains('unique_ticket_per_day')) {
-          errorMessage = 'You already have a ticket for this service today. Please check your active tickets.';
-        } else {
-          errorMessage = 'This record already exists.';
-        }
+        errorMessage = 'This record already exists.';
       } else if (e.toString().contains('network') ||
           e.toString().contains('connection') ||
           e.toString().contains('timeout')) {
@@ -618,6 +697,55 @@ class EnhancedQueueProvider extends ChangeNotifier {
     _clearError();
   }
 
+  // Cancel a ticket
+  Future<void> cancelTicket(String ticketId) async {
+    if (_isOnline) {
+      await _executeWithErrorHandling(() async {
+        await _executeCancelTicket(ticketId);
+      });
+    } else {
+      // Update local ticket status
+      final ticketIndex = _userTickets.indexWhere((t) => t.id == ticketId);
+      if (ticketIndex != -1) {
+        final updatedTicket = QueueTicket(
+          id: _userTickets[ticketIndex].id,
+          serviceId: _userTickets[ticketIndex].serviceId,
+          userId: _userTickets[ticketIndex].userId,
+          ticketNumber: _userTickets[ticketIndex].ticketNumber,
+          status: 'cancelled',
+          queueDate: _userTickets[ticketIndex].queueDate,
+          createdAt: _userTickets[ticketIndex].createdAt,
+          timeCalled: _userTickets[ticketIndex].timeCalled,
+          finishedAt: _userTickets[ticketIndex].finishedAt,
+        );
+
+        _userTickets[ticketIndex] = updatedTicket;
+      }
+
+      _addOfflineAction('cancel_ticket', {
+        'ticket_id': ticketId,
+      });
+
+      notifyListeners();
+    }
+  }
+
+  Future<void> _executeCancelTicket(String ticketId) async {
+    debugPrint('🚫 Cancelling ticket $ticketId');
+
+    try {
+      await _supabase.from('queues').update({
+        'status': 'cancelled',
+      }).eq('id', ticketId);
+
+      debugPrint('✅ Ticket cancelled successfully');
+      await loadUserTickets();
+    } catch (e) {
+      debugPrint('❌ Failed to cancel ticket: $e');
+      rethrow;
+    }
+  }
+
   // Helper method to get service name by ID
   String getServiceName(String serviceId) {
     try {
@@ -628,12 +756,127 @@ class EnhancedQueueProvider extends ChangeNotifier {
     }
   }
 
+  // Load transaction history with filters
+  Future<void> loadTransactions({
+    required DateTime startDate,
+    required DateTime endDate,
+    int? serviceWindow,
+    String? status,
+  }) async {
+    await _executeWithErrorHandling(() async {
+      final startDateStr = startDate.toIso8601String().split('T')[0];
+      final endDateStr = endDate.toIso8601String().split('T')[0];
+
+      debugPrint('🔍 Loading transactions from $startDateStr to $endDateStr');
+      debugPrint('   Window: $serviceWindow, Status: $status');
+
+      // Ensure services are loaded
+      if (_services.isEmpty) {
+        debugPrint('⚠️ Services not loaded, loading now...');
+        await loadServices();
+      }
+
+      // Start building the query
+      // Note: We can't join profiles directly, so we'll fetch user data separately
+      var queryBuilder = _supabase
+          .from('queues')
+          .select('*, services(id, name, service_window)')
+          .gte('queue_date', startDateStr)
+          .lte('queue_date', endDateStr);
+
+      debugPrint('📊 Base query built for dates: $startDateStr to $endDateStr');
+
+      // Filter by status if specified (do this before filter)
+      if (status != null && status.isNotEmpty) {
+        queryBuilder = queryBuilder.eq('status', status);
+        debugPrint('   Applied status filter: $status');
+      }
+
+      // Filter by service window if specified
+      if (serviceWindow != null) {
+        // Get service IDs for this window
+        final servicesForWindow = _services.where((s) => s.window == serviceWindow).toList();
+
+        debugPrint('   Found ${servicesForWindow.length} services for window $serviceWindow');
+
+        if (servicesForWindow.isNotEmpty) {
+          final serviceIds = servicesForWindow.map((s) => s.id).toList();
+          debugPrint('   Service IDs: $serviceIds');
+
+          // Convert service IDs to the format needed for filter: (id1,id2,id3)
+          final serviceIdsString = '(${serviceIds.join(',')})';
+          queryBuilder = queryBuilder.filter('service_id', 'in', serviceIdsString);
+          debugPrint('   Applied service window filter: $serviceIdsString');
+        } else {
+          debugPrint('⚠️ No services found for window $serviceWindow');
+          _transactions = [];
+          return;
+        }
+      }
+
+      // Apply ordering and execute
+      debugPrint('🚀 Executing query...');
+      final response = await queryBuilder.order('created_at', ascending: false);
+
+      debugPrint('📦 Raw response length: ${response.length}');
+      if (response.isNotEmpty) {
+        debugPrint('   Sample record: ${response.first}');
+      }
+
+      // Fetch user profiles for all unique user IDs
+      final userIds = response.map((r) => r['user_id'] as String).toSet().toList();
+      debugPrint('👥 Fetching ${userIds.length} user profiles...');
+
+      Map<String, Map<String, dynamic>> userProfiles = {};
+      if (userIds.isNotEmpty) {
+        final profilesResponse = await _supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .filter('id', 'in', '(${userIds.join(',')})');
+
+        for (var profile in profilesResponse) {
+          userProfiles[profile['id']] = profile;
+        }
+        debugPrint('✅ Fetched ${userProfiles.length} profiles');
+      }
+
+      // Merge queue data with profile data
+      _transactions = response.map<Transaction>((json) {
+        try {
+          // Add profile data to the json
+          final userId = json['user_id'];
+          if (userProfiles.containsKey(userId)) {
+            json['profiles'] = userProfiles[userId];
+          } else {
+            // Provide fallback data
+            json['profiles'] = {
+              'id': userId,
+              'full_name': 'Unknown User',
+              'email': '',
+            };
+          }
+          return Transaction.fromJson(json);
+        } catch (e) {
+          debugPrint('❌ Error parsing transaction: $e');
+          debugPrint('   JSON: $json');
+          rethrow;
+        }
+      }).toList();
+
+      debugPrint('✅ Loaded ${_transactions.length} transactions');
+      if (_transactions.isEmpty) {
+        debugPrint('⚠️ No transactions found with current filters');
+      }
+    });
+  }
+
   @override
   void dispose() {
     _statusSubscription?.cancel();
     _queueSubscription?.cancel();
     _reconnectTimer?.cancel();
     _offlineQueueTimer?.cancel();
+    _adminQueuePollingTimer?.cancel();
     super.dispose();
   }
 

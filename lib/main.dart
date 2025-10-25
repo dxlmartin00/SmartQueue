@@ -143,6 +143,12 @@ class RoleBasedHome extends StatelessWidget {
                   ElevatedButton(
                     onPressed: () async {
                       await Supabase.instance.client.auth.signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/login',
+                          (route) => false,
+                        );
+                      }
                     },
                     child: const Text('Sign Out'),
                   ),

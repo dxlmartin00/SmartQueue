@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../state/queue_provider.dart';
 import 'queue_control_screen.dart';
 import 'analytics_screen.dart';
+import 'transaction_history_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -21,6 +22,66 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     provider.loadServices();
     provider.loadServiceStatuses();
     provider.subscribeToServiceStatus();
+  }
+
+  void _showSignOutDialog(BuildContext context) {
+    // Store a reference to the widget's context
+    final widgetContext = context;
+
+    showDialog(
+      context: widgetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.logout, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Sign Out'),
+            ],
+          ),
+          content: const Text('Are you sure you want to sign out?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                try {
+                  debugPrint('🚪 Admin signing out...');
+                  await Supabase.instance.client.auth.signOut();
+                  debugPrint('✅ Sign out successful');
+
+                  // Force navigation to login screen
+                  if (widgetContext.mounted) {
+                    Navigator.of(widgetContext).pushNamedAndRemoveUntil(
+                      '/login',
+                      (route) => false,
+                    );
+                  }
+                } catch (e) {
+                  debugPrint('❌ Sign out error: $e');
+                  if (widgetContext.mounted) {
+                    ScaffoldMessenger.of(widgetContext).showSnackBar(
+                      SnackBar(
+                        content: Text('Error signing out: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Sign Out'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -41,7 +102,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   const Text('Unauthorized Access'),
                   const SizedBox(height: 8),
                   ElevatedButton(
-                    onPressed: () => Supabase.instance.client.auth.signOut(),
+                    onPressed: () async {
+                      await Supabase.instance.client.auth.signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/login',
+                          (route) => false,
+                        );
+                      }
+                    },
                     child: const Text('Sign Out'),
                   ),
                 ],
@@ -55,6 +124,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
         return Scaffold(
           appBar: AppBar(
+            automaticallyImplyLeading: false,
             backgroundColor: windowColor,
             title: Row(
               children: [
@@ -90,14 +160,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.logout, color: Colors.white),
-                onPressed: () => Supabase.instance.client.auth.signOut(),
+                icon: const Icon(Icons.logout, color: Colors.white, size: 28),
+                onPressed: () => _showSignOutDialog(context),
                 tooltip: 'Sign Out',
               ),
             ],
           ),
           body: DefaultTabController(
-            length: 2,
+            length: 3,
             child: Column(
               children: [
                 Container(
@@ -112,6 +182,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         text: 'Queue Control',
                       ),
                       Tab(
+                        icon: Icon(Icons.history),
+                        text: 'History',
+                      ),
+                      Tab(
                         icon: Icon(Icons.analytics),
                         text: 'Analytics',
                       ),
@@ -121,9 +195,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Expanded(
                   child: TabBarView(
                     children: [
-                      // Only show queue control for assigned window
+                      // Queue control for assigned window
                       QueueControlScreen(serviceWindow: assignedWindow),
-                      // Analytics for assigned window only
+                      // Transaction history for assigned window
+                      TransactionHistoryScreen(serviceWindow: assignedWindow),
+                      // Analytics for assigned window
                       AnalyticsScreen(specificWindow: assignedWindow),
                     ],
                   ),
