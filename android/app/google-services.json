@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "439664392698",
+    "project_id": "smartqueue-1f6a2",
+    "storage_bucket": "smartqueue-1f6a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:439664392698:android:759ca7fd05b33ccd618c43",
+        "android_client_info": {
+          "package_name": "com.smartqueue.smart_queue"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "439664392698-s16i6btg00pgq9n3jrgf4nkrbcl2md28.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.smartqueue.smart_queue",
+            "certificate_hash": "6c46fd8b3138cbdeb7a95365471cdbabd3151dac"
+          }
+        },
+        {
+          "client_id": "439664392698-r2k1upc7id7p6esnub2qvhv2hp35nthe.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8VyMnq6e7jD_ZbVMQrwm8XhYy4ocgLXc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "439664392698-r2k1upc7id7p6esnub2qvhv2hp35nthe.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "439664392698-4cjdp6c6927r0vnpnpb539crv48ebj1g.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.smartqueue.smartQueue"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
