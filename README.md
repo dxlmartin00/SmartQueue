@@ -64,3 +64,30 @@ The app follows a **3-Tier Architecture**:
     ```
 
 ## 📂 Project Structure
+    android/ ├── build.gradle.kts # Android build configuration
+             ├── local.properties # Local properties for Android
+             ├── app/ ├── build.gradle.kts # App-specific build configuration
+             ├── google-services.json # Firebase configuration for Android
+             ├── src/ # Source code for Android
+            
+    ios/     ├── Runner/ # iOS app files
+             ├── AppDelegate.swift # iOS app delegate
+             ├── Info.plist # iOS app configuration
+    
+    lib/     ├── models/ # Data models (Ticket, User) 
+             ├── services/ # Firebase & Notification logic 
+             ├── widgets/ # Reusable UI components 
+             ├── main.dart # Entry point 
+             ├── student_dashboard.dart 
+             └── admin_dashboard.dart
+    
+    test/ # Unit and widget tests
+    web/ # Web-specific files
+    linux/ # Linux-specific files
+    macos/ # macOS-specific files
+    windows/ # Windows-specific files
+
+## 👨‍💻 Author
+**Luigie Martin** BS Computer Science Student  
+*North Eastern Mindanao State University - Lianga Campus*
+*Assassin Academy 2026*
