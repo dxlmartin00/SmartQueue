@@ -30,7 +30,10 @@ The app follows a **3-Tier Architecture**:
 3.  **Data:** Google Cloud Firestore (NoSQL)
 
 ## 📸 Screenshots
-*(Add your screenshots here later, e.g., <img src="assets/screen1.png" width="200" />)*
+<img src="assets/screenshot.jpg" width="200" />
+<img src="assets/screenshot1.jpg" width="200" />
+<img src="assets/screenshot2.jpg" width="200" />
+<img src="assets/screenshot3.jpg" width="200" />
 
 ## 🚀 Getting Started
 
@@ -42,7 +45,7 @@ The app follows a **3-Tier Architecture**:
 ### Installation
 1.  **Clone the repository**
     ```bash
-    git clone [https://github.com/yourusername/smartqueue.git](https://github.com/yourusername/smartqueue.git)
+    git clone [https://github.com/dxlmartin00/SmartQueue.git](https://github.com/dxlmartin00/SmartQueue.git)
     cd smartqueue
     ```
 
