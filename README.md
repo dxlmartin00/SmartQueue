@@ -90,4 +90,5 @@ The app follows a **3-Tier Architecture**:
 ## 👨‍💻 Author
 **Luigie Martin** BS Computer Science Student  
 *North Eastern Mindanao State University - Lianga Campus*
+
 *Assassin Academy 2026*
