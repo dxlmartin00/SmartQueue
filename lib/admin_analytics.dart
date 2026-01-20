@@ -150,7 +150,7 @@ class _OverviewTab extends StatelessWidget {
   }
 }
 
-// --- TAB 2: HISTORY (Grouped by Date) ---
+// --- TAB 2: HISTORY (Updated with Text Badges) ---
 class _HistoryTab extends StatelessWidget {
   final int days;
   const _HistoryTab({required this.days});
@@ -218,6 +218,7 @@ class _HistoryTab extends StatelessWidget {
                        borderRadius: BorderRadius.circular(12)
                      ),
                      child: ListTile(
+                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                        leading: Text(
                          "#${data['ticketNumber']}",
                          style: TextStyle(
@@ -226,11 +227,28 @@ class _HistoryTab extends StatelessWidget {
                            color: isCancelled ? Colors.red : const Color(0xFF1A237E)
                          ),
                        ),
-                       title: Text(data['userName']),
+                       title: Text(data['userName'], style: const TextStyle(fontWeight: FontWeight.bold)),
                        subtitle: Text("${data['serviceCategory']} • $timeStr"),
-                       trailing: isCancelled 
-                         ? const Icon(Icons.cancel, color: Colors.red)
-                         : const Icon(Icons.check_circle, color: Colors.green),
+                       
+                       // --- NEW: TEXT BADGE INSTEAD OF ICON ---
+                       trailing: Container(
+                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                         decoration: BoxDecoration(
+                           color: isCancelled ? Colors.red.shade100 : Colors.green.shade100,
+                           borderRadius: BorderRadius.circular(20),
+                           border: Border.all(
+                             color: isCancelled ? Colors.red.shade300 : Colors.green.shade300
+                           ),
+                         ),
+                         child: Text(
+                           isCancelled ? "Transaction Unsuccessful" : "Transaction Successful",
+                           style: TextStyle(
+                             color: isCancelled ? Colors.red.shade900 : Colors.green.shade900,
+                             fontWeight: FontWeight.bold,
+                             fontSize: 12,
+                           ),
+                         ),
+                       ),
                      ),
                    );
                 })

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart'; // <--- 1. NEW IMPORT (For Web Check)
 import 'firebase_options.dart';
-import 'auth_wrapper.dart'; // <--- Import this
+import 'auth_wrapper.dart';
 import 'services/notification_service.dart';
+import 'monitor_dashboard.dart'; // <--- 2. NEW IMPORT (For Monitor)
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,7 +12,11 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  await NotificationService.init(); // Initialize Notifications
+  // 3. SAFETY CHECK: Only init notifications if NOT on web
+  // This prevents the "Uncaught Error" crash on the browser
+  if (!kIsWeb) {
+    await NotificationService.init(); 
+  }
   
   runApp(const MyApp());
 }
@@ -21,7 +27,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SmartQueue U', // Official Name
+      title: 'SmartQueue', // Official Name
       debugShowCheckedModeBanner: false,
       
       // --- PROFESSIONAL THEME START ---
@@ -76,6 +82,18 @@ class MyApp extends StatelessWidget {
       // --- PROFESSIONAL THEME END ---
 
       home: const AuthWrapper(),
+
+      // 4. ADD ROUTES HERE (This enables the Monitor URL)
+      routes: {
+        // 1. Dual View (Side-by-Side)
+        '/monitor': (context) => const MonitorDual(),
+        
+        // 2. Counter 1 Only
+        '/monitor1': (context) => const MonitorCounter1(),
+        
+        // 3. Counter 2 Only
+        '/monitor2': (context) => const MonitorCounter2(),
+      },
     );
   }
 }
