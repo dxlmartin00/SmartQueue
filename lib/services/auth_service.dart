@@ -1,12 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart'; // <--- REQUIRED for kIsWeb
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // This constructor will now work perfectly with version 6.2.1
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
   );
@@ -17,47 +17,64 @@ class AuthService {
   // Stream to listen to auth changes
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // 1. LOGIN: Student (Google)
+  // 1. LOGIN: Student (Google) - SMART HYBRID METHOD
   Future<User?> signInWithGoogle() async {
     try {
-      // Trigger the authentication flow
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // User canceled
+      UserCredential userCredential;
 
-      // Obtain the auth details
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      if (kIsWeb) {
+        // --- WEB STRATEGY: Use Popup (Much safer & easier) ---
+        GoogleAuthProvider googleProvider = GoogleAuthProvider();
+        
+        // This triggers the browser popup directly without using the google_sign_in package
+        userCredential = await _auth.signInWithPopup(googleProvider);
+      } else {
+        // --- MOBILE STRATEGY: Use Native Google Sign In ---
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) return null; // User canceled
 
-      // Create a new credential
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final AuthCredential credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
 
-      // Sign in to Firebase
-      UserCredential userCredential = await _auth.signInWithCredential(credential);
+        userCredential = await _auth.signInWithCredential(credential);
+      }
+
+      // --- SAVE USER DATA ---
       User? user = userCredential.user;
-
       if (user != null) {
         await _saveUserToFirestore(user);
       }
       return user;
+
     } catch (e) {
       print("Error signing in with Google: $e");
       return null;
     }
   }
 
-  // Helper to save user data
+  // Helper to save user data (With Null Safety Fixes)
   Future<void> _saveUserToFirestore(User user) async {
-    DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
-    if (!userDoc.exists) {
+    try {
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
+      
+      // We use 'set' with 'merge: true' to ensure we don't accidentally wipe data
+      // We also use '??' to provide default values if Google returns null
       await _firestore.collection('users').doc(user.uid).set({
         'uid': user.uid,
-        'email': user.email,
-        'displayName': user.displayName,
+        'email': user.email ?? '', // Fallback to empty string
+        'displayName': user.displayName ?? 'Student', // Fallback to 'Student'
+        'photoUrl': user.photoURL ?? '', // Save photo URL if available
         'role': 'student',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        'lastLogin': FieldValue.serverTimestamp(),
+        // Only set 'createdAt' if it doesn't exist yet
+        if (!userDoc.exists) 'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+    } catch (e) {
+      print("Error saving user to Firestore: $e");
     }
   }
 
@@ -77,7 +94,10 @@ class AuthService {
 
   // 3. LOGOUT
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
+    // Only try to sign out of Google Plugin if NOT on web
+    if (!kIsWeb) {
+      await _googleSignIn.signOut();
+    }
     await _auth.signOut();
   }
 }
